@@ -152,3 +152,22 @@ TEST("agent service: launchd and systemd files") {
     CHECK(unit.find("Restart=always") != std::string::npos);
     CHECK(unit.find("WantedBy=multi-user.target") != std::string::npos);
 }
+
+TEST("agent: only one agent per settings folder") {
+    std::string dir = (fs::temp_directory_path() / ("sentinel-lock-" + random_hex(6))).string();
+    std::string err;
+    {
+        InstanceLock a;
+        REQUIRE(a.acquire(dir, err));
+#if !defined(_WIN32)
+        // flock — на открытый файл: второй open в том же процессе тоже получит отказ
+        InstanceLock b;
+        CHECK(!b.acquire(dir, err));
+        CHECK(err.find("already running") != std::string::npos);
+#endif
+    }
+    InstanceLock c;  // первый вышел — можно снова
+    CHECK(c.acquire(dir, err));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}

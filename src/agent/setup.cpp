@@ -15,6 +15,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 #if defined(__APPLE__)
@@ -563,6 +565,54 @@ void service_status(bool& installed, bool& running, std::string& details) {
     ProcResult r = run({systemctl, "is-active", kUnit});
     running = r.ok() && trim(r.output) == "active";
     if (installed) details = "log: " + si.log_hint;
+#endif
+}
+
+InstanceLock::~InstanceLock() {
+#if defined(_WIN32)
+    if (handle_) CloseHandle(static_cast<HANDLE>(handle_));
+#else
+    if (fd_ >= 0) close(fd_);  // flock снимается вместе с дескриптором
+#endif
+}
+
+bool InstanceLock::acquire(const std::string& state_dir, std::string& error) {
+    std::error_code ec;
+    fs::create_directories(state_dir, ec);
+    std::string path = (fs::path(state_dir) / "agent.lock").string();
+#if defined(_WIN32)
+    HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        error = GetLastError() == ERROR_SHARING_VIOLATION
+                    ? "another sentinel-agent is already running with these settings (maybe the SentinelAgent service)."
+                      " Stop it first: sc stop SentinelAgent"
+                    : "cannot create " + path;
+        return false;
+    }
+    handle_ = h;
+    return true;
+#else
+    int fd = ::open(path.c_str(), O_RDWR | O_CREAT, 0600);
+    if (fd < 0) {
+        error = "cannot create " + path + " (no permission? the background service may run as root — use sudo)";
+        return false;
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        char buf[32] = {};
+        ssize_t n = pread(fd, buf, sizeof(buf) - 1, 0);
+        std::string pid = n > 0 ? std::string(trim(std::string_view(buf, size_t(n)))) : "";
+        ::close(fd);
+        error = "another sentinel-agent is already running with these settings" + (pid.empty() ? "" : " (pid " + pid + ")") +
+                ".\nIf it is the background service, you do not need to start it by hand: sentinel-agent service status."
+                "\nOtherwise stop the other one first (Ctrl+C in its window, or kill " + (pid.empty() ? "<pid>" : pid) + ").";
+        return false;
+    }
+    std::string me = std::to_string(getpid()) + "\n";
+    if (ftruncate(fd, 0) == 0 && pwrite(fd, me.data(), me.size(), 0) < 0) {
+    }
+    fd_ = fd;
+    return true;
 #endif
 }
 

@@ -55,6 +55,25 @@ void service_status(bool& installed, bool& running, std::string& details);
 std::string launchd_plist(const std::string& exe, const std::string& config, const std::string& log_file);
 std::string systemd_unit(const std::string& exe, const std::string& config);
 
+// Один агент на один agent.yaml: второй экземпляр (например, служба + окно Терминала)
+// отправлял бы те же строки дважды. Блокировка снимается при выходе (и при падении процесса).
+class InstanceLock {
+public:
+    InstanceLock() = default;
+    ~InstanceLock();
+    InstanceLock(const InstanceLock&) = delete;
+    InstanceLock& operator=(const InstanceLock&) = delete;
+    // false и понятное сообщение, если другой агент уже работает с этой папкой состояния.
+    bool acquire(const std::string& state_dir, std::string& error);
+
+private:
+#if defined(_WIN32)
+    void* handle_ = nullptr;
+#else
+    int fd_ = -1;
+#endif
+};
+
 // Полный путь к запущенной программе.
 std::string executable_path(const char* argv0);
 

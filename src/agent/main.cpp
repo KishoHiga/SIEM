@@ -254,6 +254,13 @@ static void WINAPI svc_main(DWORD, LPSTR*) {
         svc_state(SERVICE_STOPPED, 1);
         return;
     }
+    InstanceLock lock;
+    if (!lock.acquire(cfg.state_dir, err)) {
+        log::error(err);
+        g_svc_exit = 1;
+        svc_state(SERVICE_STOPPED, 1);
+        return;
+    }
     Agent agent(cfg);
     if (!agent.init(err)) {
         log::error(err);
@@ -429,6 +436,18 @@ int main(int argc, char** argv) {
                 std::cerr << "error: connect the agent first (" << g_self << " enroll --server URL --token TOKEN)\n";
                 return 1;
             }
+            {
+                // агент уже запущен вручную (в окне Терминала)? Служба тогда не сможет стартовать.
+                bool installed = false, running = false;
+                std::string details;
+                service_status(installed, running, details);
+                InstanceLock probe;
+                if (!running && !probe.acquire(cfg.state_dir, err)) {
+                    std::cerr << "error: the agent is already running in another window. Stop it there (Ctrl+C), then run\n"
+                              << "  " << g_self << " service install\nagain — the background service will replace it.\n";
+                    return 1;
+                }
+            }
             if (!service_install(exe, config, out, err)) {
                 std::cerr << "error: " << err << "\n";
                 return 1;
@@ -470,6 +489,11 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    InstanceLock run_lock;  // до init: второй экземпляр не должен даже начинать
+    if (cmd == "run" && !run_lock.acquire(cfg.state_dir, err)) {
+        std::cerr << "error: " << err << "\n";
+        return 1;
+    }
     Agent agent(cfg);
     if (!agent.init(err)) {
         std::cerr << "error: " << err << "\n";
