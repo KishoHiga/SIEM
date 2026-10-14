@@ -216,7 +216,8 @@ bool Agent::init(std::string& error) {
         }
         log::info("agent: source [", s.source, "] ", s.kind, " ", s.path);
     }
-    if (sources_.empty()) log::warn("agent: no log sources found. Add them under 'sources:' in ", cfg_.path);
+    if (sources_.empty()) log::warn("agent: no log sources found. Add one: sentinel-agent add /path/to/access.log");
+    config_stamp_ = config_stamp();
 
     std::string fw_err;
     fw_ = Firewall::create(cfg_.firewall, cfg_.state_dir, fw_runner_, fw_err);
@@ -425,7 +426,7 @@ void Agent::rescan(int64_t now) {
                 uint64_t size = fs::file_size(p, ec);
                 if (sv != saved_.end() && sv->second.dev == id.dev && sv->second.ino == id.ino && sv->second.offset <= size) {
                     offset = sv->second.offset;  // продолжаем с того же места
-                } else if (first_scan_ && !fsrc->spec.from_beginning && cfg_.start_at != "beginning") {
+                } else if ((first_scan_ || fsrc->fresh) && !fsrc->spec.from_beginning && cfg_.start_at != "beginning") {
                     offset = size;  // первый запуск: только новые записи
                 }
                 auto t = std::make_unique<FileTailer>(p, offset);
@@ -456,8 +457,66 @@ void Agent::rescan(int64_t now) {
                 ++it;
             }
         }
+        fsrc->fresh = false;
     }
     first_scan_ = false;
+}
+
+int64_t Agent::config_stamp() const {
+    std::error_code ec;
+    auto t = fs::last_write_time(cfg_.path, ec);
+    if (ec) return 0;
+    uint64_t size = fs::file_size(cfg_.path, ec);
+    return int64_t(t.time_since_epoch().count()) ^ int64_t(size << 1);
+}
+
+void Agent::reload_config_if_changed() {
+    int64_t stamp = config_stamp();
+    if (stamp == 0 || stamp == config_stamp_) return;
+    config_stamp_ = stamp;
+    AgentConfig next;
+    std::string err;
+    if (!load_agent_config(cfg_.path, next, err)) {
+        log::warn("agent: ", cfg_.path, " changed but has an error, keeping the old settings: ", err);
+        return;
+    }
+    if (next.server != cfg_.server || next.key != cfg_.key || next.pin != cfg_.pin || next.ca_file != cfg_.ca_file)
+        log::warn("agent: server connection settings changed — restart the agent to apply them");
+    cfg_.exclude = next.exclude;
+    cfg_.autodiscover = next.autodiscover;
+    cfg_.sources = next.sources;
+    std::vector<SourceSpec> fresh = effective_sources(cfg_, nullptr);
+    auto same = [](const SourceSpec& a, const SourceSpec& b) { return a.kind == b.kind && a.path == b.path; };
+    // убранные файлы — перестаём читать
+    for (auto it = files_.begin(); it != files_.end();) {
+        bool keep = std::any_of(fresh.begin(), fresh.end(), [&](const SourceSpec& s) { return same(s, (*it)->spec); });
+        if (!keep) {
+            log::info("agent: source removed [", (*it)->spec.source, "] ", (*it)->spec.path);
+            it = files_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& s : fresh) {
+        if (s.kind != "file") {
+            bool known = std::any_of(sources_.begin(), sources_.end(), [&](const SourceSpec& o) { return same(o, s); });
+            if (!known) log::warn("agent: new ", s.kind, " source '", s.path, "' — restart the agent to start it");
+            continue;
+        }
+        auto it = std::find_if(files_.begin(), files_.end(), [&](const auto& f) { return same(f->spec, s); });
+        if (it != files_.end()) {
+            (*it)->spec.format = s.format;  // метка и формат могли поменяться
+            (*it)->spec.source = s.source;
+            continue;
+        }
+        auto f = std::make_unique<FileSource>();
+        f->spec = s;
+        f->fresh = true;
+        files_.push_back(std::move(f));
+        log::info("agent: new source [", s.source, "] ", s.path);
+    }
+    sources_ = std::move(fresh);
+    last_rescan_ = 0;  // сразу посмотреть новые файлы
 }
 
 bool Agent::send_lines(const SourceSpec& spec, const std::vector<std::string>& lines, bool json_array) {
@@ -542,6 +601,7 @@ size_t Agent::step() {
         if (fw_status_ != before) last_block_sync_ = now - sync_ms + 1000;
     }
     if (now - last_rescan_ >= 2000 || first_scan_) {
+        if (!first_scan_) reload_config_if_changed();
         rescan(now);
         last_rescan_ = now;
     }

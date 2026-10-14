@@ -61,6 +61,8 @@ jobs:
           fi
       - name: App smoke test
         run: .github/scripts/annotate.sh packaging/macos/smoke-test.sh dist/SentinelCore.app
+      - name: Agent as a background service (launchd)
+        run: .github/scripts/annotate.sh .github/scripts/agent-service-macos.sh dist/SentinelCore.app/Contents/Resources/bin/sentinel-agent
       - name: HTTPS with system certificates
         run: |
           out="$(dist/SentinelCore.app/Contents/Resources/bin/sentinel-agent enroll --server https://api.github.com \

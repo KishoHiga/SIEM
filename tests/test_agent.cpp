@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "agent/agent.hpp"
+#include "agent/setup.hpp"
 #include "agent/discover.hpp"
 #include "agent/files.hpp"
 #include "agent/winevent.hpp"
@@ -418,4 +419,60 @@ TEST("agent: discover runs on this machine without crashing") {
     auto r = sentinel::agent::discover_sources();
     for (auto& src : r.sources) CHECK(!src.path.empty());
     CHECK(true);
+}
+
+TEST("agent: 'add' and 'remove' are picked up by a running agent, old lines are not sent") {
+    using namespace sentinel::agent;
+    Siem s(false);
+    Tmp d;
+    std::string token, err, name;
+    REQUIRE(s.api->enroll_store().create(3600000, 1, "", token, err));
+    AgentConfig cfg;
+    cfg.path = d.path + "/agent.yaml";
+    cfg.server = s.url(false);
+    cfg.host = "web-02";
+    cfg.state_dir = d.path + "/state";
+    cfg.autodiscover = false;
+    REQUIRE(Agent::enroll(cfg, token, err, name));
+    std::string site = d.path + "/shop.log";
+    auto line = [](int i) {
+        return "203.0.113.50 - - [12/Oct/2026:10:00:0" + std::to_string(i) + " +0000] \"GET /p" + std::to_string(i) +
+               " HTTP/1.1\" 200 5 \"-\" \"curl\"\n";
+    };
+    append_file(site, line(0) + line(1));  // старое — до 'add'
+    AgentConfig loaded;
+    REQUIRE(load_agent_config(cfg.path, loaded, err));
+    Agent a(loaded);
+    REQUIRE(a.init(err));
+    a.step();
+    CHECK_EQ(a.stats().lines_sent, uint64_t(0));
+
+    auto read = [&] {
+        std::ifstream in(cfg.path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    SourceSpec sp;
+    sp.path = site;
+    sp.format = "nginx";
+    sp.source = "shop";
+    REQUIRE(write_file_atomic(cfg.path, yaml_add_source(read(), sp), err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2100));
+    a.step();
+    a.step();
+    CHECK_EQ(a.stats().lines_sent, uint64_t(0));  // уже лежавшие строки не шлём
+    append_file(site, line(2));
+    a.step();
+    CHECK_EQ(a.stats().lines_sent, uint64_t(1));
+
+    std::string out;
+    REQUIRE(yaml_remove_source(read(), site, out));
+    REQUIRE(write_file_atomic(cfg.path, out, err));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2100));
+    a.step();
+    append_file(site, line(3));
+    a.step();
+    CHECK_EQ(a.stats().lines_sent, uint64_t(1));  // больше не читаем
+    a.shutdown();
+    s.wait_idle();
+    CHECK_EQ(s.count_events("src_ip=203.0.113.50"), size_t(1));
 }

@@ -72,6 +72,7 @@ private:
             int64_t until;
         };
         std::vector<Draining> draining;
+        bool fresh = false;  // добавлен на ходу: уже существующие файлы читать только с новых строк
     };
     struct CommandSource;
     struct WinSource {
@@ -83,6 +84,9 @@ private:
     };
 
     void rescan(int64_t now);
+    // agent.yaml изменили (например, 'sentinel-agent add'): подхватить новые файлы без перезапуска
+    void reload_config_if_changed();
+    int64_t config_stamp() const;
     bool send_lines(const SourceSpec& spec, const std::vector<std::string>& lines, bool json_array);
     bool drain_tailer(FileSource& fs, FileTailer& t, size_t& sent);
     void load_state();
@@ -109,6 +113,7 @@ private:
     bool first_scan_ = true;
     bool state_dirty_ = false;
     int64_t last_rescan_ = 0;
+    int64_t config_stamp_ = 0;
     int64_t last_save_ = 0;
     int64_t backoff_until_ = 0;
     int64_t backoff_ms_ = 0;
