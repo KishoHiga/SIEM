@@ -38,10 +38,42 @@
 | `src/agent` | агент: автопоиск логов, чтение хвоста с позицией, ротации, доставка с повторами, журнал Windows, применение блокировок в брандмауэре |
 | `web/` | панель на React + TypeScript (из зависимостей только React; графики, иконки, маршруты — свои) |
 | `rules/` | 16 правил обнаружения, у каждого встроенные примеры «должно сработать / не должно» |
-| `tests/` | 107 тестов (свой мини-фреймворк) |
+| `tests/` | 108 тестов (свой мини-фреймворк) |
+| `packaging/macos/` | приложение для Mac (значок в строке меню), сборка `.dmg` |
+| `Dockerfile`, `docker/` | образ и `docker-compose.yml` |
 | `tools/bench.cpp` | замер скорости |
 
-## Сборка
+## Установка
+
+Готовые сборки — на странице [Releases](https://github.com/KishoHiga/SIEM/releases):
+
+**Приложение для Mac** (`SentinelCore-<версия>-macOS.dmg`, Apple Silicon и Intel, macOS 12+): перетащите в «Программы»
+и запустите. В строке меню появится значок щита, а панель откроется в браузере уже под администратором.
+Приложение не подписано платным сертификатом Apple, поэтому первый запуск нужно разрешить:
+macOS 15+ — Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть»;
+macOS 12–14 — правый щелчок → «Открыть». Данные — `~/Library/Application Support/SentinelCore`.
+
+**Docker** (amd64 и arm64): скачайте `docker-compose.yml` из релиза (он же лежит в `docker/`) и выполните
+```bash
+docker compose up -d
+docker compose logs sentinel     # ключ администратора
+```
+Панель — http://localhost:8080. Данные — в томе `sentinel-data`. Обновление: `docker compose pull && docker compose up -d`.
+
+Переменные окружения (для Docker и не только):
+
+| Переменная | Что делает |
+|---|---|
+| `SENTINEL_ADMIN_KEY` | ключ администратора, который создаётся при первом запуске (20+ символов). Без неё сервер придумает ключ сам и покажет его |
+| `SENTINEL_LISTEN` | где слушать, `host:port` (вместо `listen` в конфиге) |
+| `SENTINEL_PUBLIC_URL` | адрес, по которому агенты достучатся до сервера (попадает в готовую команду подключения) |
+| `SENTINEL_TLS=on` | HTTPS с самоподписанным сертификатом в `<data_dir>/tls` (создаётся один раз) |
+| `SENTINEL_TLS_NAMES` | имена и адреса для этого сертификата через запятую |
+| `SENTINEL_WEB_DIR` | где лежит собранная панель (вместо `web_dir`) |
+
+Проверка, что сервер жив (её использует Docker): `sentinel-server healthcheck -c sentinel.yaml`.
+
+## Сборка из исходников
 
 Нужны компилятор C++20, CMake и (для HTTPS) OpenSSL.
 
@@ -77,7 +109,7 @@ npm run build        # результат в web/dist, сервер раздаё
 
 Проверка, что всё работает:
 ```bash
-./build/sentinel-tests                      # 64 теста
+./build/sentinel-tests                      # 108 тестов
 ./build/sentinel-server test-rules          # правила на своих примерах
 ./build/sentinel-bench --rules rules        # замер скорости
 ```
@@ -529,4 +561,5 @@ data/
 серверов SentinelCore.
 
 Ограничения: `Transfer-Encoding: chunked` не поддерживается (агент отправляет `Content-Length`).
+Сборка и тесты на macOS (Apple Silicon и Intel) и Linux идут на GitHub Actions при каждом изменении.
 Чтение журнала Windows и брандмауэр Windows собраны и проверены тестами, но на настоящей Windows ещё не запускались.

@@ -32,7 +32,9 @@ public:
     bool has_name(const std::string& name) const;
     size_t size() const;
     // Создать ключ: запись в файл + сразу в память. secret показывается один раз.
-    bool add(const std::string& name, Role role, std::string& secret, std::string& error);
+    // preset — свой секрет вместо случайного (SENTINEL_ADMIN_KEY при первом запуске).
+    bool add(const std::string& name, Role role, std::string& secret, std::string& error,
+             const std::string* preset = nullptr);
 
 private:
     mutable std::shared_mutex mu_;

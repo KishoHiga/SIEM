@@ -1,0 +1,11 @@
+# Настройки SentinelCore в контейнере. Всё, что меняется чаще всего, задаётся переменными окружения
+# (см. docker-compose.yml): SENTINEL_ADMIN_KEY, SENTINEL_PUBLIC_URL, SENTINEL_TLS.
+# Чтобы настроить больше (уведомления, автоблокировку, чёрные списки, отчёты на почту), положите свой файл
+# рядом с docker-compose.yml и подключите его строкой  - ./sentinel.yaml:/etc/sentinel/sentinel.yaml:ro
+# Полный пример всех настроек — sentinel.example.yaml в репозитории.
+
+listen: 0.0.0.0:8080
+data_dir: /data                       # всё хранится в томе /data
+rules_dir: /data/rules                # правила (при первом запуске копируются из образа; правятся в панели)
+web_dir: /usr/share/sentinel/web      # панель
+retention_days: 90

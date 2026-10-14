@@ -1,7 +1,7 @@
 build/
 build-*/
 data/
-sentinel.yaml
+/sentinel.yaml
 *.o
 *.a
 .DS_Store

@@ -1,0 +1,9 @@
+build/
+build-*/
+data/
+web/node_modules/
+web/dist/
+.git/
+.github/
+*.o
+*.a

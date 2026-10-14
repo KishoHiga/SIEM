@@ -262,7 +262,8 @@ TEST("firewall: real processes — run_process, nginx backend with rollback, com
     REQUIRE(cmd->apply(v4, v6, err));
     CHECK_EQ(read_all(copy), std::string("203.0.113.9\n198.51.100.0/24\n2001:db8::1\n"));
     FirewallConfig bad = cc;
-    bad.command = "exit 7";
+    // свой код выхода; не зависит от оболочки (bash на macOS не принимает лишний аргумент у exit)
+    bad.command = "sh -c 'exit 7' x";
     auto badfw = Firewall::create(bad, d.path, nullptr, err);
     CHECK(!badfw->apply(v4, {}, err));
     CHECK(err.find("exit 7") != std::string::npos);

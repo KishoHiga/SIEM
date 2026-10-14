@@ -1,0 +1,35 @@
+# SentinelCore — запуск одной командой:
+#
+#   docker compose up -d
+#
+# Панель: http://localhost:8080
+# Ключ для входа: тот, что вы впишете в SENTINEL_ADMIN_KEY ниже, или, если оставите пустым,
+# сервер создаст его сам и покажет:  docker compose logs sentinel
+#
+# Обновить до новой версии:  docker compose pull && docker compose up -d   (данные сохраняются в томе)
+
+services:
+  sentinel:
+    image: ghcr.io/kishohiga/siem:latest
+    container_name: sentinel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # панель, API и приём логов от агентов
+    environment:
+      # Ключ администратора для входа в панель (20+ символов, без пробелов). Задаётся только при первом
+      # запуске; потом ключи меняются в самой системе. Пусто — сервер придумает ключ и выведет его в лог.
+      SENTINEL_ADMIN_KEY: ""
+      # Часовой пояс (время в отчётах и письмах)
+      TZ: "Europe/Moscow"
+      # Адрес, по которому агенты с других серверов достучатся до этого (попадёт в готовую команду подключения):
+      # SENTINEL_PUBLIC_URL: "https://siem.example.com:8080"
+      # HTTPS со своим сертификатом (создаётся один раз и хранится в томе); агенты проверяют его по отпечатку:
+      # SENTINEL_TLS: "on"
+      # SENTINEL_TLS_NAMES: "siem.example.com,192.168.1.10"
+    volumes:
+      - sentinel-data:/data
+      # свои настройки (уведомления, автоблокировка, отчёты на почту):
+      # - ./sentinel.yaml:/etc/sentinel/sentinel.yaml:ro
+
+volumes:
+  sentinel-data:

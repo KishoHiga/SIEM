@@ -1,3 +1,4 @@
+#include <functional>
 #include <random>
 #include <regex>
 
@@ -164,6 +165,145 @@ static std::string random_pattern(std::mt19937& rng, int depth) {
     return p;
 }
 
+// Эталон для случайных проверок: простейший перебор с возвратами для того же подмножества синтаксиса,
+// что выдаёт random_pattern (a b c . [ab] [^a] \n, группы, |, * + ? {1,2}, ^ $). Медленный, но очевидно верный
+// и одинаковый на всех платформах (std::regex в libc++ у Apple ошибается, например, на «b?$» и «cac»).
+namespace refrx {
+
+struct Item;
+using Seq = std::vector<Item>;
+struct Node {
+    enum Kind { Char, Any, Set, Group, Bol, Eol } kind = Char;
+    char c = 0;
+    bool neg = false;
+    std::string set;
+    std::vector<Seq> alts;  // для Group
+};
+struct Item {
+    Node node;
+    int min = 1, max = 1;  // max = -1 — без ограничения
+};
+
+struct Parser {
+    const std::string& p;
+    size_t i = 0;
+    std::vector<Seq> alts() {
+        std::vector<Seq> out(1);
+        while (i < p.size() && p[i] != ')') {
+            if (p[i] == '|') {
+                ++i;
+                out.emplace_back();
+                continue;
+            }
+            out.back().push_back(item());
+        }
+        return out;
+    }
+    Item item() {
+        Item it;
+        char ch = p[i++];
+        if (ch == '(') {
+            it.node.kind = Node::Group;
+            it.node.alts = alts();
+            ++i;  // ')'
+        } else if (ch == '.') {
+            it.node.kind = Node::Any;
+        } else if (ch == '^') {
+            it.node.kind = Node::Bol;
+        } else if (ch == '$') {
+            it.node.kind = Node::Eol;
+        } else if (ch == '[') {
+            it.node.kind = Node::Set;
+            if (p[i] == '^') {
+                it.node.neg = true;
+                ++i;
+            }
+            while (p[i] != ']') it.node.set.push_back(p[i++]);
+            ++i;
+        } else if (ch == '\\') {
+            char e = p[i++];
+            it.node.c = e == 'n' ? '\n' : e;
+        } else {
+            it.node.c = ch;
+        }
+        if (i < p.size()) {
+            if (p[i] == '*') it.min = 0, it.max = -1, ++i;
+            else if (p[i] == '+') it.min = 1, it.max = -1, ++i;
+            else if (p[i] == '?') it.min = 0, it.max = 1, ++i;
+            else if (p[i] == '{') {  // только {1,2}
+                it.min = p[i + 1] - '0';
+                it.max = p[i + 3] - '0';
+                i += 5;
+            }
+        }
+        return it;
+    }
+};
+
+using Cont = std::function<bool(size_t)>;
+struct Matcher {
+    const std::string& t;
+    bool seq(const Seq& s, size_t idx, size_t pos, const Cont& k) const {
+        if (idx == s.size()) return k(pos);
+        return item(s[idx], pos, 0, [&](size_t p2) { return seq(s, idx + 1, p2, k); });
+    }
+    bool item(const Item& it, size_t pos, int count, const Cont& k) const {
+        if (count >= it.min && k(pos)) return true;
+        if (it.max != -1 && count >= it.max) return false;
+        return atom(it.node, pos, [&](size_t p2) {
+            if (p2 == pos && count >= it.min) return false;  // пустой повтор ничего не даёт (и не зацикливает)
+            return item(it, p2, count + 1, k);
+        });
+    }
+    bool atom(const Node& n, size_t pos, const Cont& k) const {
+        switch (n.kind) {
+            case Node::Bol: return pos == 0 && k(pos);
+            case Node::Eol: return pos == t.size() && k(pos);
+            case Node::Group:
+                for (auto& a : n.alts)
+                    if (seq(a, 0, pos, k)) return true;
+                return false;
+            default: break;
+        }
+        if (pos >= t.size()) return false;
+        char ch = t[pos];
+        bool ok = n.kind == Node::Any ? ch != '\n'
+                  : n.kind == Node::Set ? (n.set.find(ch) != std::string::npos) != n.neg
+                                        : ch == n.c;
+        return ok && k(pos + 1);
+    }
+};
+
+bool search(const std::string& pat, const std::string& text) {
+    Parser ps{pat};
+    std::vector<Seq> top = ps.alts();
+    Matcher m{text};
+    for (size_t start = 0; start <= text.size(); ++start)
+        for (auto& a : top)
+            if (m.seq(a, 0, start, [](size_t) { return true; })) return true;
+    return false;
+}
+
+}  // namespace refrx
+
+// std::regex как второй эталон — только там, где он надёжен (libstdc++).
+#if defined(__GLIBCXX__)
+constexpr bool kStdRegexReference = true;
+#else
+constexpr bool kStdRegexReference = false;
+#endif
+
+TEST("regex: reference matcher agrees with known answers") {
+    CHECK(refrx::search("b?$", "cac"));
+    CHECK(refrx::search("(b*){1,2}$", "ba"));
+    CHECK(!refrx::search("^b", "ab"));
+    CHECK(refrx::search("a(b|c)+$", "xabcb"));
+    CHECK(!refrx::search("a.c", "a\nc"));
+    CHECK(refrx::search("[^a]", "\n"));
+    CHECK(!refrx::search("^(a|b){1,2}$", "abc"));
+    CHECK(refrx::search("^(a|b){1,2}$", "ab"));
+}
+
 TEST("regex: differential fuzz vs std::regex") {
     std::mt19937 rng(12345);
     int compared = 0, mismatches = 0;
@@ -176,23 +316,31 @@ TEST("regex: differential fuzz vs std::regex") {
             ++mismatches;
             continue;
         }
-        std::regex ref(pat, std::regex::ECMAScript);
+        std::regex ref;
+        if (kStdRegexReference) ref = std::regex(pat, std::regex::ECMAScript);
         for (int t = 0; t < 8; ++t) {
             std::string text;
             int len = int(rng() % 12);
             for (int k = 0; k < len; ++k) text.push_back("abc\n"[rng() % 4]);
             bool a = mine.search(text);
-            bool b;
-            try {
-                b = std::regex_search(text, ref);
-            } catch (const std::regex_error&) {
-                continue;  // эталонный std::regex сдался (возврат слишком сложный) — пропускаем
+            bool b = refrx::search(pat, text);
+            if (kStdRegexReference) {
+                try {
+                    if (std::regex_search(text, ref) != b) {
+                        std::cerr << "reference disagreement pat=[" << pat << "]\n";
+                        ++mismatches;
+                    }
+                } catch (const std::regex_error&) {
+                }
             }
             ++compared;
             if (a != b) {
                 ++mismatches;
-                if (mismatches < 5)
-                    std::cerr << "mismatch pat=[" << pat << "] text=[" << text << "] mine=" << a << " ref=" << b << "\n";
+                if (mismatches < 6) {
+                    std::string shown;
+                    for (char ch : text) shown += ch == '\n' ? std::string("\\n") : std::string(1, ch);
+                    std::cerr << "mismatch pat=[" << pat << "] text=[" << shown << "] mine=" << a << " ref=" << b << "\n";
+                }
             }
         }
     }
@@ -205,13 +353,11 @@ TEST("regex: multi matcher equals individual matching (fuzz)") {
     int mismatches = 0;
     for (int round = 0; round < 30; ++round) {
         std::vector<std::string> pats;
-        std::vector<std::regex> refs;
         MultiMatcher mm;
         for (int i = 0; i < 25; ++i) {
             std::string p = random_pattern(rng, 0);
             if (mm.add(p) < 0) continue;
             pats.push_back(p);
-            refs.emplace_back(p, std::regex::ECMAScript);
         }
         REQUIRE(mm.compile());
         for (int t = 0; t < 40; ++t) {
@@ -223,9 +369,17 @@ TEST("regex: multi matcher equals individual matching (fuzz)") {
             std::vector<bool> g(pats.size(), false);
             for (auto id : got) g[id] = true;
             for (size_t i = 0; i < pats.size(); ++i) {
-                try {
-                    if (g[i] != std::regex_search(text, refs[i])) ++mismatches;
-                } catch (const std::regex_error&) {
+                {
+                    bool ref = refrx::search(pats[i], text);
+                    if (g[i] != ref) {
+                        ++mismatches;
+                        if (mismatches < 6) {
+                            std::string shown;
+                            for (char ch : text) shown += ch == '\n' ? std::string("\\n") : std::string(1, ch);
+                            std::cerr << "mismatch(multi) pat=[" << pats[i] << "] text=[" << shown << "] mine=" << g[i]
+                                      << " ref=" << ref << "\n";
+                        }
+                    }
                 }
             }
         }

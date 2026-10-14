@@ -86,7 +86,8 @@ size_t KeyStore::size() const {
     return keys_.size();
 }
 
-bool KeyStore::add(const std::string& name, Role role, std::string& secret, std::string& error) {
+bool KeyStore::add(const std::string& name, Role role, std::string& secret, std::string& error,
+                   const std::string* preset) {
     if (!valid_key_name(name)) {
         error = "bad key name";
         return false;
@@ -97,7 +98,16 @@ bool KeyStore::add(const std::string& name, Role role, std::string& secret, std:
             error = "key '" + name + "' already exists";
             return false;
         }
-    secret = "snt_" + random_hex(24);
+    if (preset) {
+        if (preset->size() < 20 || preset->size() > 200 ||
+            preset->find_first_of(" \t\r\n") != std::string::npos) {
+            error = "the key must be 20..200 characters without spaces";
+            return false;
+        }
+        secret = *preset;
+    } else {
+        secret = "snt_" + random_hex(24);
+    }
     ApiKey k{name, role, sha256_hex(secret)};
     if (!append_key_file(file_, k, error)) return false;
     keys_.push_back(k);

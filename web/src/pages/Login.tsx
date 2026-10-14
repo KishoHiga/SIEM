@@ -53,7 +53,8 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
           {busy ? "Проверка…" : "Войти"}
         </button>
         <p className="login-hint">
-          Ключ администратора сервер печатает при первом запуске. Новый ключ:
+          Ключ администратора сервер печатает при первом запуске (в Docker — <code>docker compose logs sentinel</code>,
+          в приложении для Mac — меню «Скопировать ключ администратора»). Новый ключ:
           <code>sentinel-server keygen --name ivan --role analyst</code>
         </p>
       </form>

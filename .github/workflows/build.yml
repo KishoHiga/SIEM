@@ -1,0 +1,163 @@
+name: Build
+
+# Каждый push — сборка и тесты на macOS и Linux, проверка Docker-образа.
+# Метка вида v0.6.0 — то же самое плюс публикация: образ в ghcr.io и Release с приложением для Mac.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENSSL_VERSION: "3.5.9"
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+jobs:
+  macos:
+    name: macOS app (Apple Silicon + Intel)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Version
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="$(sed -n 's/^project(SentinelCore VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: OpenSSL cache
+        id: ssl
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/openssl
+          key: openssl-${{ env.OPENSSL_VERSION }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-universal-v1
+      - name: OpenSSL (universal, static)
+        if: steps.ssl.outputs.cache-hit != 'true'
+        run: .github/scripts/annotate.sh packaging/macos/build-openssl.sh "$RUNNER_TEMP/openssl"
+      - name: Build app
+        run: .github/scripts/annotate.sh packaging/macos/build-app.sh "${{ steps.v.outputs.version }}" "$RUNNER_TEMP/openssl" dist
+      - name: Tests (Apple Silicon)
+        run: .github/scripts/run-tests.sh ./build-macos/sentinel-tests
+      - name: Tests (Intel, Rosetta)
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            .github/scripts/run-tests.sh arch -x86_64 ./build-macos/sentinel-tests
+          else
+            echo "::warning title=Intel tests::Rosetta is not available on this runner — skipped"
+          fi
+      - name: App smoke test
+        run: .github/scripts/annotate.sh packaging/macos/smoke-test.sh dist/SentinelCore.app
+      - name: HTTPS with system certificates
+        run: |
+          out="$(dist/SentinelCore.app/Contents/Resources/bin/sentinel-agent enroll --server https://api.github.com \
+                 --token sne_0000000000000000000000000000 -c "$RUNNER_TEMP/agent.yaml" 2>&1 || true)"
+          echo "$out"
+          if echo "$out" | grep -qi "certificate\|verify"; then echo "::error::TLS certificate verification failed: $out"; exit 1; fi
+      - name: DMG contents
+        run: |
+          hdiutil attach dist/*.dmg -mountpoint /tmp/sc-dmg -nobrowse -quiet
+          ls -la /tmp/sc-dmg
+          test -x "/tmp/sc-dmg/SentinelCore.app/Contents/MacOS/SentinelCore"
+          hdiutil detach /tmp/sc-dmg -quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/*.dmg
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: Linux tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libssl-dev
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j 4
+      - name: Tests
+        run: .github/scripts/run-tests.sh ./build/sentinel-tests
+
+  docker:
+    name: Docker (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name
+        id: img
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "version=dev" >> "$GITHUB_OUTPUT"; fi
+      - name: Build
+        run: |
+          docker buildx create --use --name sc
+          .github/scripts/annotate.sh docker buildx build --progress=plain --load --platform linux/${{ matrix.arch }} \
+            --build-arg VERSION=${{ steps.img.outputs.version }} -t sentinel:test .
+      - name: Smoke test
+        run: .github/scripts/annotate.sh .github/scripts/docker-smoke.sh sentinel:test
+      - name: Push by digest
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx build --platform linux/${{ matrix.arch }} \
+            --build-arg VERSION=${{ steps.img.outputs.version }} \
+            --output type=image,name=${{ steps.img.outputs.name }},push-by-digest=true,name-canonical=true,push=true \
+            --metadata-file meta.json .
+          mkdir -p digests
+          python3 -c "import json; print(json.load(open('meta.json'))['containerimage.digest'])" > digests/${{ matrix.arch }}
+          cat digests/${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, linux, docker]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Docker image (amd64 + arm64)
+        run: |
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          v="${GITHUB_REF#refs/tags/v}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker buildx imagetools create -t "$name:$v" -t "$name:latest" \
+            "$name@$(cat artifacts/digest-amd64/amd64)" "$name@$(cat artifacts/digest-arm64/arm64)"
+          docker buildx imagetools inspect "$name:$v"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${GITHUB_REF#refs/tags/v}"
+          sed -e "s/@VERSION@/$v/g" -e "s#@IMAGE@#ghcr.io/${GITHUB_REPOSITORY,,}#g" packaging/release-notes.md > notes.md
+          sed -e "s#ghcr.io/kishohiga/siem:latest#ghcr.io/${GITHUB_REPOSITORY,,}:latest#" docker/docker-compose.yml > docker-compose.yml
+          gh release create "v$v" --title "SentinelCore $v" --notes-file notes.md \
+            artifacts/macos/*.dmg artifacts/macos/*.tar.gz docker-compose.yml

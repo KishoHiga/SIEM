@@ -6,9 +6,11 @@
 //   sentinel-server keygen --name web-01 --role ingest   создать ключ доступа вручную
 //   sentinel-server test-rules [--rules DIR]             проверить правила на их примерах
 //   sentinel-server version
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -19,6 +21,7 @@
 #include "detect/engine.hpp"
 #include "detect/rule_tests.hpp"
 #include "detect/rules.hpp"
+#include "net/client.hpp"
 #include "net/server.hpp"
 #include "net/tls.hpp"
 #include "server/access.hpp"
@@ -58,7 +61,15 @@ static void usage() {
               << "  sentinel-server test-rules [--rules DIR] [-c sentinel.yaml]\n"
               << "  sentinel-server geo-import FILE.csv [FILE2.csv...] [-c sentinel.yaml]   country/ASN/city database\n"
               << "  sentinel-server geo-lookup IP [-c sentinel.yaml]\n"
-              << "  sentinel-server version\n";
+              << "  sentinel-server healthcheck [-c sentinel.yaml]   exit 0 if the server answers /health\n"
+              << "  sentinel-server version\n"
+              << "\nEnvironment (handy for Docker):\n"
+              << "  SENTINEL_ADMIN_KEY=...     admin key to create on the first start (20+ characters)\n"
+              << "  SENTINEL_LISTEN=host:port  where to listen (overrides 'listen' in the config)\n"
+              << "  SENTINEL_PUBLIC_URL=...    address agents use, e.g. https://siem.example.com:8443\n"
+              << "  SENTINEL_WEB_DIR=...       where the built panel is (overrides 'web_dir')\n"
+              << "  SENTINEL_TLS=on            HTTPS with a self-signed certificate in <data_dir>/tls (made once)\n"
+              << "  SENTINEL_TLS_NAMES=a,b     names for that certificate (default: localhost,127.0.0.1)\n";
 }
 
 struct Args {
@@ -165,6 +176,88 @@ static std::string tls_fingerprint(const Config& cfg) {
     return fp;
 }
 
+static const char* env(const char* name) {
+    const char* v = std::getenv(name);
+    return v && *v ? v : nullptr;
+}
+
+static bool env_on(const char* name) {
+    const char* v = env(name);
+    if (!v) return false;
+    std::string s = to_lower(v);
+    return s == "1" || s == "on" || s == "true" || s == "yes" || s == "auto";
+}
+
+// Переменные окружения поверх конфига (Docker, приложение для Mac).
+static bool apply_env(Config& cfg, std::string& error) {
+    if (const char* v = env("SENTINEL_LISTEN")) {
+        std::string l = v;
+        size_t colon = l.rfind(':');
+        auto port = colon == std::string::npos ? std::nullopt : parse_uint(l.substr(colon + 1));
+        if (!port || *port > 65535) {
+            error = "SENTINEL_LISTEN must be host:port";
+            return false;
+        }
+        std::string host = l.substr(0, colon);
+        if (host.size() > 1 && host.front() == '[' && host.back() == ']') host = host.substr(1, host.size() - 2);
+        cfg.listen_host = host.empty() ? "0.0.0.0" : host;
+        cfg.listen_port = uint16_t(*port);
+    }
+    if (const char* v = env("SENTINEL_PUBLIC_URL")) cfg.public_url = v;
+    if (const char* v = env("SENTINEL_WEB_DIR")) cfg.web_dir = v;
+    if (env_on("SENTINEL_TLS") && cfg.tls_cert.empty()) {
+        cfg.tls_cert = cfg.data_dir + "/tls/server.crt";
+        cfg.tls_key = cfg.data_dir + "/tls/server.key";
+    }
+    return true;
+}
+
+// SENTINEL_TLS=on: сертификат создаётся один раз и потом используется тот же (отпечаток не меняется).
+static bool ensure_env_cert(const Config& cfg, std::string& error) {
+    if (!env_on("SENTINEL_TLS")) return true;
+    std::error_code ec;
+    if (std::filesystem::exists(cfg.tls_cert, ec) && std::filesystem::exists(cfg.tls_key, ec)) return true;
+    std::vector<std::string> names;
+    if (const char* v = env("SENTINEL_TLS_NAMES"))
+        for (auto n : split(v, ','))
+            if (!trim(n).empty()) names.emplace_back(trim(n));
+    if (names.empty()) names = {"localhost", "127.0.0.1"};
+    net::Url u;
+    std::string uerr;
+    if (!cfg.public_url.empty() && net::parse_url(cfg.public_url, u, uerr) &&
+        std::find(names.begin(), names.end(), u.host) == names.end())
+        names.push_back(u.host);
+    std::string fp;
+    if (!net::generate_self_signed(cfg.tls_cert, cfg.tls_key, names, 825, fp, error)) return false;
+    log::info("tls: created a self-signed certificate for ", names.size(), " name(s), fingerprint ", fp);
+    return true;
+}
+
+static int cmd_healthcheck(const Config& cfg) {
+    std::string host = cfg.listen_host;
+    if (host.empty() || host == "0.0.0.0") host = "127.0.0.1";
+    if (host == "::") host = "::1";
+    net::Url u;
+    u.https = !cfg.tls_cert.empty();
+    u.host = host;
+    u.port = cfg.listen_port;
+    net::ClientTlsOptions tls;
+    tls.pin_sha256 = tls_fingerprint(cfg);  // свой сертификат — проверяем по отпечатку
+    net::HttpClient c(u, tls, 5000);
+    net::ClientResponse r;
+    std::string err;
+    if (!c.request("GET", "/health", {}, "", r, err)) {
+        std::cerr << "unhealthy: " << err << "\n";
+        return 1;
+    }
+    if (r.status != 200) {
+        std::cerr << "unhealthy: HTTP " << r.status << "\n";
+        return 1;
+    }
+    std::cout << "ok\n";
+    return 0;
+}
+
 static int cmd_test_rules(const Config& cfg, const std::string& dir_arg) {
     std::string dir = dir_arg.empty() ? cfg.rules_dir : dir_arg;
     auto res = load_rules_dir(dir);
@@ -253,6 +346,10 @@ static int cmd_run(Config& cfg) {
 
     std::shared_ptr<net::TlsContext> tls;
     std::string err;
+    if (!ensure_env_cert(cfg, err)) {
+        log::error("tls: ", err);
+        return 1;
+    }
     if (!cfg.tls_cert.empty()) {
         tls = net::TlsContext::server(cfg.tls_cert, cfg.tls_key, err);
         if (!tls) {
@@ -390,15 +487,22 @@ static int cmd_run(Config& cfg) {
 
     if (api.keys().size() == 0) {
         std::string secret;
-        if (!api.keys().add("admin", Role::Admin, secret, err)) {
-            log::error("cannot create initial admin key: ", err);
+        std::string preset = env("SENTINEL_ADMIN_KEY") ? env("SENTINEL_ADMIN_KEY") : "";
+        if (!api.keys().add("admin", Role::Admin, secret, err, preset.empty() ? nullptr : &preset)) {
+            log::error("cannot create initial admin key: ", err, preset.empty() ? "" : " (SENTINEL_ADMIN_KEY)");
             pipeline.stop();
             return 1;
         }
-        std::cout << "\n=====================================================================\n"
+        std::string phost = cfg.listen_host == "0.0.0.0" || cfg.listen_host == "::" ? "localhost" : cfg.listen_host;
+        std::string panel_hint = std::string(cfg.tls_cert.empty() ? "http://" : "https://") + phost + ":" +
+                                 std::to_string(cfg.listen_port) + "/";
+        if (!preset.empty()) {
+            log::info("first start: created the admin key from SENTINEL_ADMIN_KEY");
+        } else std::cout << "\n=====================================================================\n"
                   << " First start: created ADMIN key (shown only once, save it now):\n\n"
                   << "   " << secret << "\n\n"
-                  << " Use it as:  Authorization: Bearer <key>\n"
+                  << " Log in to the panel with it: " << panel_hint << "\n"
+                  << " Use it in the API as:  Authorization: Bearer <key>\n"
                   << " Connect an agent:  sentinel-server enroll-token\n"
                   << "=====================================================================\n"
                   << std::endl;
@@ -429,7 +533,7 @@ static int cmd_run(Config& cfg) {
     bool local = cfg.listen_host == "127.0.0.1" || cfg.listen_host == "localhost" || cfg.listen_host == "::1";
     if (!local && !tls)
         log::warn("listening on a non-local address WITHOUT encryption. Run 'sentinel-server gen-cert' and set tls: "
-                  "in the config, or put nginx with HTTPS in front.");
+                  "in the config, or put nginx with HTTPS in front (in Docker: SENTINEL_TLS=on).");
 
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
@@ -506,6 +610,10 @@ int main(int argc, char** argv) {
         std::cerr << "config error: " << err << "\n";
         return 1;
     }
+    if (!apply_env(cfg, err)) {
+        std::cerr << "config error: " << err << "\n";
+        return 1;
+    }
     if (cfg.log_level == "debug") log::set_level(log::Level::Debug);
     else if (cfg.log_level == "warn") log::set_level(log::Level::Warn);
     else if (cfg.log_level == "error") log::set_level(log::Level::Error);
@@ -517,6 +625,7 @@ int main(int argc, char** argv) {
     if (a.cmd == "gen-cert") return cmd_gen_cert(cfg, a);
     if (a.cmd == "enroll-token") return cmd_enroll_token(cfg, a);
     if (a.cmd == "run") return cmd_run(cfg);
+    if (a.cmd == "healthcheck") return cmd_healthcheck(cfg);
     usage();
     return 2;
 }

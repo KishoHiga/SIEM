@@ -35,6 +35,17 @@ export function App() {
 
   useEffect(() => {
     setUnauthorizedHandler(() => setMe(null));
+    // Вход по ссылке из приложения для Mac: http://127.0.0.1:8080/#key=snt_…
+    // Ключ сразу убирается из адресной строки и истории (часть после # на сервер не отправляется).
+    const m = window.location.hash.match(/^#key=([A-Za-z0-9_.\-]{20,200})$/);
+    if (m) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      api
+        .login(m[1])
+        .catch(() => undefined)
+        .finally(() => void loadMe());
+      return;
+    }
     void loadMe();
   }, [loadMe]);
 
