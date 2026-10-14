@@ -202,6 +202,10 @@ private:
     };
     std::mutex sessions_mu_;
     std::unordered_map<std::string, Session> sessions_;  // id сессии -> кто вошёл
+    // Одноразовые билеты для живой ленты: Safari не всегда передаёт cookie в WebSocket,
+    // поэтому панель сначала берёт билет обычным запросом и подключается с ним (живёт 60 с).
+    std::unordered_map<std::string, Session> ws_tickets_;  // под sessions_mu_
+    void ws_ticket(const net::HttpRequest& req, net::HttpResponse& resp, const ApiKey& key);
 
     std::shared_ptr<WebFiles> web_;
     BlockList* blocks_ = nullptr;

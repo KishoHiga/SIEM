@@ -126,7 +126,7 @@ struct WsClient {
     }
 
     // Возвращает HTTP-статус ответа на рукопожатие (101 — успех).
-    int open(uint16_t port, const Headers& extra) {
+    int open(uint16_t port, const Headers& extra, const std::string& path = "/ws/live") {
         std::string err;
         fd = net::connect_tcp("127.0.0.1", port, err);
         if (fd == net::kInvalidSocket) return -1;
@@ -137,7 +137,7 @@ struct WsClient {
         timeval tv{5, 0};
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
-        std::string req = "GET /ws/live HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
+        std::string req = "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port) +
                           "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n";
         for (auto& h : extra) req += h.first + ": " + h.second + "\r\n";
@@ -360,6 +360,41 @@ TEST("web: websocket live feed — handshake, auth, origin, ping, broadcast") {
     CHECK(!ws.read_frame(op, payload));
     for (int i = 0; i < 200 && s.server->ws_clients() != 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     CHECK_EQ(s.server->ws_clients(), size_t(0));
+}
+
+TEST("web: live feed by one-time ticket (Safari does not always send the cookie to WebSocket)") {
+    WebSiem s;
+    const uint16_t port = s.server->port();
+    const std::string origin = "http://127.0.0.1:" + std::to_string(port);
+    std::string cookie = session_cookie(
+        s.call("POST", "/api/v1/login", {{"X-Requested-With", "sentinel"}}, "{\"key\":\"" + s.reader + "\"}"));
+    // билет выдаётся только вошедшему и только POST с заголовком против CSRF
+    CHECK_EQ(s.call("POST", "/api/v1/ws-ticket").status, 401);
+    CHECK_EQ(s.call("POST", "/api/v1/ws-ticket", {{"Cookie", cookie}}).status, 403);
+    CHECK_EQ(s.call("POST", "/api/v1/ws-ticket", {{"Authorization", "Bearer " + s.ingest}}).status, 403);
+    auto r = s.call("POST", "/api/v1/ws-ticket", {{"Cookie", cookie}, {"X-Requested-With", "sentinel"}});
+    CHECK_EQ(r.status, 200);
+    JValue v;
+    std::string err;
+    CHECK(json_parse(r.body, v, err));
+    std::string ticket = v.get("ticket") ? v.get("ticket")->s : "";
+    CHECK_EQ(ticket.size(), size_t(64));
+    {
+        WsClient bad;
+        CHECK_EQ(bad.open(port, {{"Origin", origin}}, "/ws/live?ticket=" + std::string(64, 'a')), 401);
+    }
+    {
+        WsClient evil;  // чужой сайт не может воспользоваться билетом
+        CHECK_EQ(evil.open(port, {{"Origin", "https://evil.example"}}, "/ws/live?ticket=" + ticket), 401);
+    }
+    {
+        WsClient ws;  // без cookie, только с билетом
+        CHECK_EQ(ws.open(port, {{"Origin", origin}}, "/ws/live?ticket=" + ticket), 101);
+    }
+    {
+        WsClient again;  // билет одноразовый
+        CHECK_EQ(again.open(port, {{"Origin", origin}}, "/ws/live?ticket=" + ticket), 401);
+    }
 }
 
 TEST("web: panel files — SPA fallback, cache, security headers, no path traversal") {

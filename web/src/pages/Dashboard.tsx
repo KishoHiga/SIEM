@@ -247,7 +247,9 @@ function LiveEvents() {
     <Card
       title={
         <>
-          Живая лента <span className={`live-badge ${state}`}>{state === "online" ? "LIVE" : "нет связи"}</span>
+          Живая лента <span className={`live-badge ${state}`}>
+            {state === "online" ? "LIVE" : state === "connecting" ? "подключение…" : "нет связи"}
+          </span>
         </>
       }
       actions={
@@ -258,7 +260,11 @@ function LiveEvents() {
       }
     >
       {list.length === 0 ? (
-        <Empty>Ждём события… Подключите сервер на странице «Серверы».</Empty>
+        <Empty>
+          {state === "offline"
+            ? "Нет связи с сервером ленты. Обновите страницу; если не поможет — перезапустите сервер в меню приложения."
+            : "Пока событий нет. Как только на сайт кто-то зайдёт, строки появятся здесь. Сайт ещё не подключён — «Серверы» → «Подключить сайт»."}
+        </Empty>
       ) : (
         <ul className="feed feed-events">
           {list.slice(0, 40).map((e) => (

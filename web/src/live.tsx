@@ -1,7 +1,9 @@
 // Живая лента через WebSocket: раз в секунду сервер присылает сводку
 // (сколько событий пришло, последние события, новые алерты). Сам переподключается.
+// При открытии и после переподключения лента сразу заполняется последними событиями из базы,
+// чтобы не было пусто, если события пришли до того, как открыли панель.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Alert, SiemEvent } from "./api";
+import { api, type Alert, type SiemEvent } from "./api";
 
 export interface Tick {
   type: "tick";
@@ -48,15 +50,41 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     let lastTick = 0;
     let watchdog: number | undefined;
 
-    const connect = () => {
+    // последние события из базы — без повторов с тем, что уже пришло по ленте
+    const backfill = () => {
+      api
+        .events({ limit: 30 })
+        .then((p) => {
+          if (closed) return;
+          setRecent((r) => {
+            const seen = new Set(r.map((e) => e.id));
+            const add = p.items.filter((e) => !seen.has(e.id));
+            if (!add.length) return r;
+            return [...r, ...add].sort((a, b) => b.id - a.id).slice(0, MAX_RECENT);
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    const connect = async () => {
       if (closed) return;
       setState("connecting");
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      ws = new WebSocket(`${proto}//${window.location.host}/ws/live`);
+      // Одноразовый билет: Safari не всегда отдаёт cookie входа в WebSocket.
+      // Старый сервер без билетов — подключаемся как раньше, по cookie.
+      let ticket = "";
+      try {
+        ticket = (await api.wsTicket()).ticket;
+      } catch {
+        ticket = "";
+      }
+      if (closed) return;
+      ws = new WebSocket(`${proto}//${window.location.host}/ws/live${ticket ? `?ticket=${ticket}` : ""}`);
       ws.onopen = () => {
         retry = 0;
         lastTick = Date.now();
         setState("online");
+        backfill();
       };
       ws.onmessage = (m) => {
         let t: Tick;
@@ -86,11 +114,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         if (closed) return;
         setState("offline");
         retry = Math.min(retry + 1, 6);
-        timer = window.setTimeout(connect, 500 * 2 ** retry); // 1 с, 2 с, 4 с ... до 32 с
+        timer = window.setTimeout(() => void connect(), 500 * 2 ** retry); // 1 с, 2 с, 4 с ... до 32 с
       };
       ws.onerror = () => ws?.close();
     };
-    connect();
+    void connect();
     // сервер шлёт пульс раз в 5 с; если 15 с тишина — связь потеряна, переподключаемся
     watchdog = window.setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN && Date.now() - lastTick > 15000) ws.close();

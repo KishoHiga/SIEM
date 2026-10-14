@@ -471,6 +471,7 @@ export const api = {
   login: (key: string) => request<{ name: string; role: Role }>("POST", "/api/v1/login", { key }),
   logout: () => request<{ ok: boolean }>("POST", "/api/v1/logout"),
   me: () => request<Me>("GET", "/api/v1/me"),
+  wsTicket: () => request<{ ticket: string }>("POST", "/api/v1/ws-ticket"),
   stats: (minutes = 60, signal?: AbortSignal) => request<Stats>("GET", `/api/v1/stats${qs({ minutes })}`, undefined, signal),
 
   alerts: async (

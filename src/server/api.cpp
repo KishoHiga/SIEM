@@ -163,13 +163,52 @@ static bool same_origin(const HttpRequest& req) {
 }
 
 bool Api::ws_accept(const HttpRequest& req) {
-    if (!same_origin(req)) return false;
-    std::optional<ApiKey> k = session_from_cookie(req);
+    if (!same_origin(req)) {
+        log::warn("live feed: refused a connection from another site (Origin ", req.header("origin"), ", Host ",
+                  req.header("host"), ")");
+        return false;
+    }
+    std::optional<ApiKey> k;
+    std::string ticket(req.param("ticket"));
+    if (!ticket.empty()) {
+        std::string hash;
+        {
+            std::lock_guard<std::mutex> lock(sessions_mu_);
+            auto it = ws_tickets_.find(ticket);
+            if (it != ws_tickets_.end()) {
+                if (it->second.expires >= now_ms()) hash = it->second.key_hash;
+                ws_tickets_.erase(it);  // одноразовый
+            }
+        }
+        if (!hash.empty()) k = keys_.find_by_hash(hash);
+    }
+    if (!k) k = session_from_cookie(req);
     if (!k) {
         std::string_view h = req.header("authorization");
         if (h.size() > 7 && iequals(h.substr(0, 7), "bearer ")) k = keys_.find_by_secret(trim(h.substr(7)));
     }
-    return k && role_can_read(k->role);
+    if (!k) {
+        log::info("live feed: refused a connection from ", req.remote_addr, " — not logged in (",
+                  ticket.empty() ? "no ticket" : "ticket expired or already used", ")");
+        return false;
+    }
+    return role_can_read(k->role);
+}
+
+void Api::ws_ticket(const HttpRequest&, HttpResponse& resp, const ApiKey& key) {
+    std::string t = random_hex(32);
+    {
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        int64_t now = now_ms();
+        if (ws_tickets_.size() > 1000)
+            for (auto it = ws_tickets_.begin(); it != ws_tickets_.end();)
+                it = it->second.expires < now ? ws_tickets_.erase(it) : std::next(it);
+        if (ws_tickets_.size() > 10000) return resp.error(503, "too many tickets");
+        ws_tickets_[t] = Session{key.sha256, now + 60000};
+    }
+    std::string b;
+    JsonWriter(b).begin_object().kv("ticket", t).end_object();
+    resp.json(200, std::move(b));
 }
 
 void Api::login(const HttpRequest& req, HttpResponse& resp) {
@@ -442,6 +481,10 @@ void Api::handle(const HttpRequest& req, HttpResponse& resp) {
     }
     if (!need(role_can_read(key->role))) return;
 
+    if (res == "ws-ticket" && parts.size() == 3) {
+        if (!post) return resp.error(405, "use POST");
+        return ws_ticket(req, resp, *key);
+    }
     if (res == "events") {
         if (parts.size() == 3 && get) return list_events(req, resp);
         uint64_t id = 0;
