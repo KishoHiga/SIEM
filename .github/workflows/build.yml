@@ -1,7 +1,9 @@
 name: Build
 
 # Каждый push — сборка и тесты на macOS и Linux, проверка Docker-образа.
-# Метка вида v0.6.0 — то же самое плюс публикация: образ в ghcr.io и Release с приложением для Mac.
+# Выпуск версии: вкладка Actions → Build → Run workflow → версия (например 0.6.0).
+# То же самое, что и обычная сборка, плюс публикация: образ в ghcr.io, метка v<версия> и Release.
+# (Метка вида v0.6.0, отправленная из git, тоже запускает выпуск.)
 
 on:
   push:
@@ -9,12 +11,18 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Выпустить версию (например 0.6.0). Пусто — только сборка и проверка"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 env:
   OPENSSL_VERSION: "3.5.9"
+  RELEASE_INPUT: ${{ inputs.release }}
   MACOSX_DEPLOYMENT_TARGET: "12.0"
 
 jobs:
@@ -29,7 +37,7 @@ jobs:
       - name: Version
         id: v
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="$(sed -n 's/^project(SentinelCore VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"; fi
+          v="$(.github/scripts/version.sh)"
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: OpenSSL cache
         id: ssl
@@ -106,7 +114,7 @@ jobs:
         id: img
         run: |
           echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"; else echo "version=dev" >> "$GITHUB_OUTPUT"; fi
+          echo "version=$(.github/scripts/version.sh)" >> "$GITHUB_OUTPUT"
       - name: Build
         run: |
           docker buildx create --use --name sc
@@ -115,7 +123,7 @@ jobs:
       - name: Smoke test
         run: .github/scripts/annotate.sh .github/scripts/docker-smoke.sh sentinel:test
       - name: Push by digest
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker buildx build --platform linux/${{ matrix.arch }} \
@@ -126,14 +134,14 @@ jobs:
           python3 -c "import json; print(json.load(open('meta.json'))['containerimage.digest'])" > digests/${{ matrix.arch }}
           cat digests/${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
         with:
           name: digest-${{ matrix.arch }}
           path: digests/*
 
   publish:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
     needs: [macos, linux, docker]
     runs-on: ubuntu-24.04
     permissions:
@@ -147,7 +155,7 @@ jobs:
       - name: Docker image (amd64 + arm64)
         run: |
           name="ghcr.io/${GITHUB_REPOSITORY,,}"
-          v="${GITHUB_REF#refs/tags/v}"
+          v="$(.github/scripts/version.sh)"
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker buildx imagetools create -t "$name:$v" -t "$name:latest" \
             "$name@$(cat artifacts/digest-amd64/amd64)" "$name@$(cat artifacts/digest-arm64/arm64)"
@@ -156,8 +164,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          v="${GITHUB_REF#refs/tags/v}"
+          v="$(.github/scripts/version.sh)"
           sed -e "s/@VERSION@/$v/g" -e "s#@IMAGE@#ghcr.io/${GITHUB_REPOSITORY,,}#g" packaging/release-notes.md > notes.md
           sed -e "s#ghcr.io/kishohiga/siem:latest#ghcr.io/${GITHUB_REPOSITORY,,}:latest#" docker/docker-compose.yml > docker-compose.yml
-          gh release create "v$v" --title "SentinelCore $v" --notes-file notes.md \
+          gh release create "v$v" --target "$GITHUB_SHA" --title "SentinelCore $v" --notes-file notes.md \
             artifacts/macos/*.dmg artifacts/macos/*.tar.gz docker-compose.yml
