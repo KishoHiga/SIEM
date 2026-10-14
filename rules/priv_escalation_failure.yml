@@ -1,0 +1,20 @@
+id: PRIV-FAIL-001
+name: Неудачное повышение привилегий (sudo/su)
+description: Неверный пароль sudo, пользователь не в sudoers или неудачный su.
+severity: high
+type: match
+group_by: [user, host]
+cooldown: 120
+tags: [host, privilege]
+where:
+  type: privilege
+  action: [sudo, su]
+  outcome: failure
+message: 'Неудачная попытка {action} пользователем {user} на {host}'
+tests:
+  match:
+    - 'Oct 12 11:00:06 web-01 sudo:     ivan : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/home/ivan ; USER=root ; COMMAND=/bin/sh'
+    - 'Oct 12 11:00:06 web-01 sudo:   guest : user NOT in sudoers ; TTY=pts/1 ; PWD=/tmp ; USER=root ; COMMAND=/bin/bash'
+    - 'Oct 12 11:00:06 web-01 su: FAILED SU (to root) ivan on pts/0'
+  no_match:
+    - 'Oct 12 11:00:05 web-01 sudo:     ivan : TTY=pts/0 ; PWD=/home/ivan ; USER=root ; COMMAND=/usr/bin/id'

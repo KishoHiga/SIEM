@@ -1,0 +1,30 @@
+id: WEB-TRAV-001
+name: Обход каталогов (path traversal / LFI)
+description: Попытка выйти за пределы каталога сайта (../) или прочитать системные файлы.
+severity: high
+type: match
+tags: [web, lfi, owasp-a01]
+where:
+  type: web
+field: http.path
+transform: [unescape, url_decode, html_decode, compress_space, lowercase]
+patterns:
+  - '\.\.[/\\]'
+  - '[/\\]\.\.(\?|$)'
+  - '/etc/(passwd|shadow|group|hosts|issue)'
+  - '/proc/(self|\d+)/'
+  - 'c:[/\\]windows|win\.ini|boot\.ini'
+  - '(php|zip|phar|expect|data)://|file://'
+message: 'Обход каталогов с {src_ip}: {http.path}'
+tests:
+  match:
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /download?file=../../../../etc/passwd HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /download?file=%2e%2e%2f%2e%2e%2fetc%2fpasswd HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /download?file=%252e%252e%252fconfig HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /download?f=..%5c..%5cwindows%5cwin.ini HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /page?file=php://filter/convert.base64-encode/resource=index.php HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /cgi-bin/x?f=/proc/self/environ HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  no_match:
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /docs/v1.2.3/readme HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /files/report..final.pdf HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '198.51.100.7 - - [12/Oct/2026:10:00:00 +0000] "GET /a/b/./c HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

@@ -1,0 +1,24 @@
+id: WEB-SCANNER-001
+name: Сканер уязвимостей
+description: User-Agent известного инструмента взлома или сканирования (sqlmap, nikto, nuclei, ...).
+severity: medium
+type: match
+cooldown: 600
+tags: [web, recon]
+where:
+  type: web
+field: http.user_agent
+transform: [lowercase]
+patterns:
+  - 'sqlmap|nikto|nmap|masscan|zgrab|nuclei|wpscan|gobuster|dirbuster|dirb/|feroxbuster|ffuf|fuzz faster u fool|wfuzz|hydra|acunetix|netsparker|havij|w3af|fimap|commix|openvas|nessus|whatweb|xsstrike|arachni|skipfish|zmeu|morfeus|libwww-perl'
+message: 'Сканер с {src_ip}: {http.user_agent}'
+tests:
+  match:
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "sqlmap/1.7.2#stable (https://sqlmap.org)"'
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Mozilla/5.00 (Nikto/2.1.6) (Evasions:None)"'
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Fuzz Faster U Fool v2.0.0"'
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))"'
+  no_match:
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"'
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "curl/8.4.0"'
+    - '192.0.2.40 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"'

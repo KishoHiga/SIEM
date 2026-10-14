@@ -1,0 +1,16 @@
+id: WEB-FLOOD-001
+name: Слишком много запросов с одного IP
+description: Более 600 запросов в минуту с одного адреса — флуд, парсер или начало DoS.
+severity: low
+type: threshold
+threshold: 600
+window: 60
+cooldown: 600
+group_by: [src_ip]
+tags: [web, dos]
+where:
+  type: web
+message: 'Высокая частота запросов с {src_ip}: {count} за {window} с'
+tests:
+  match:
+    - '192.0.2.70 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

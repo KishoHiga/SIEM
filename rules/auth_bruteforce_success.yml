@@ -1,0 +1,15 @@
+# Цепочка: сначала сработало правило перебора, затем с ТОГО ЖЕ IP успешный вход.
+id: AUTH-COMPROMISE-001
+name: Успешный вход после перебора паролей
+description: После перебора паролей с этого же IP произошёл успешный вход — учётная запись, вероятно, взломана.
+severity: critical
+type: sequence
+group_by: [src_ip]
+within: 1800
+tags: [auth, compromise]
+steps:
+  - rule: AUTH-BRUTE-001
+  - where:
+      type: auth
+      outcome: success
+message: 'ВЗЛОМ? Успешный вход пользователя {user} с {src_ip} после перебора паролей'

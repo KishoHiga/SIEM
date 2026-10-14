@@ -1,0 +1,45 @@
+# SQL-инъекция: ищем в адресе запроса ПОСЛЕ раскодирования (%27 -> ', /**/ -> пробел).
+id: WEB-SQLI-001
+name: SQL-инъекция в запросе
+description: В адресе запроса найдены конструкции SQL-инъекции (UNION SELECT, ' OR 1=1, SLEEP(), и т.п.).
+severity: critical
+type: match
+tags: [web, injection, owasp-a03]
+where:
+  type: web
+field: http.path
+transform: [unescape, url_decode, html_decode, remove_sql_comments, compress_space, lowercase]
+patterns:
+  - 'union(\s+(all|distinct))?\s+select[\s(*@0-9]'
+  - '\x27\s*(or|and|\|\||&&)\s*\x27?\w*\x27?\s*(=|like|>|<)'
+  - '\s(or|and)\s+\d+\s*=\s*\d+'
+  - '(sleep|benchmark|pg_sleep)\s*\(\s*\d'
+  - 'waitfor\s+delay\s'
+  - 'information_schema\.'
+  - 'load_file\s*\('
+  - 'into\s+(out|dump)file\s'
+  - ';\s*(drop|truncate|alter|shutdown|exec|declare)\s'
+  - '\x27\s*(--|#|;)'
+  - '(extractvalue|updatexml)\s*\(|xp_cmdshell|@@version'
+  - 'char\s*\(\s*\d+\s*,\s*\d+'
+message: 'SQL-инъекция с {src_ip}: {http.path}'
+tests:
+  match:
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /item?id=1%20UNION%20SELECT%20password%20FROM%20users HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /login?user=admin%27%20OR%20%271%27%3D%271 HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?id=1%27%3B%20DROP%20TABLE%20users-- HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?id=1/**/UNION/**/SELECT/**/1,2 HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?id=1%2527%20or%201%3D1 HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?id=1%20AND%20SLEEP(5) HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?q=1%27%20AND%20extractvalue(1,concat(0x7e,version())) HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /p?id=1+UnIoN+aLl+SeLeCt+null,null HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  no_match:
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /static/app.css?v=0x1f HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /api/color?c=0xffffff HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /blog/how-to-update-your-profile-and-set-avatar HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /docs/select-a-plan-from-the-list-where-you-want HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=--force HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=rock%27n%27roll HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=it%27s%20a%20union%20of%20states HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=sleep%20tips HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.5 - - [12/Oct/2026:10:00:00 +0000] "GET /products?sort=price&order=desc HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

@@ -1,0 +1,133 @@
+# Пример настроек SentinelCore. Скопируйте в sentinel.yaml и поправьте под себя.
+
+# Адрес и порт. 127.0.0.1 — доступ только с этого компьютера (безопасно по умолчанию).
+# Чтобы принимать логи с других серверов: listen: 0.0.0.0:8443 и обязательно включите tls ниже.
+listen: 127.0.0.1:8080
+
+# HTTPS. Сертификат создаётся командой: sentinel-server gen-cert --names ваш.домен,IP
+# tls:
+#   cert: ./data/tls/server.crt
+#   key: ./data/tls/server.key
+
+# Адрес сервера, который увидят агенты (для команды enroll-token).
+# public_url: https://siem.example.com:8443
+
+# Собранная веб-панель (cd web && npm run build). Пусто — панель отключена, работает только API.
+web_dir: ./web/dist
+
+# Где хранить данные (события, алерты, ключи доступа).
+data_dir: ./data
+
+# Папка с правилами обнаружения. Правка файлов подхватывается на лету (каждые 2 секунды);
+# правила можно менять и в панели (раздел «Правила»), версии хранятся в data/rules-history.
+rules_dir: ./rules
+
+# Сколько дней хранить события и алерты.
+retention_days: 90
+
+# Потоки для обработки HTTP-запросов.
+workers: 4
+
+# Максимальный размер одного запроса с логами, МБ.
+max_body_mb: 32
+
+# Сколько событий может ждать обработки. Если очередь полна — сервер отвечает 503,
+# и агент повторит отправку позже (данные не теряются).
+queue_events: 1000000
+
+# Сбрасывать данные на диск каждую секунду (надёжнее при отключении питания).
+fsync: true
+
+# debug | info | warn | error
+log_level: info
+
+# Ключи доступа. Удобнее создавать командой:
+#   sentinel-server keygen --name web-01 --role ingest
+# (ключи сохраняются в data/keys.yaml и подхватываются без перезапуска).
+# Агентам ключ выдаётся автоматически: sentinel-server enroll-token. Роли:
+#   ingest  — только отправка логов (для агентов и сайтов)
+#   read    — только чтение (панель, отчёты)
+#   analyst — чтение + смена статуса алертов
+#   admin   — всё
+# api_keys:
+#   - name: web-01
+#     role: ingest
+#     sha256: <хеш ключа, создаётся keygen>
+
+# ---------------- Реагирование ----------------
+
+# Уведомления об алертах. Можно включить один канал или все сразу.
+# Повторы одной атаки (то же правило + тот же IP) в течение cooldown не присылаются;
+# если за batch пришло больше 3 алертов — приходит одна сводка вместо пачки сообщений.
+# Проверить каналы: панель → «Реагирование» → «Тест».
+# notify:
+#   min_severity: high        # info | low | medium | high | critical
+#   mode: alerts              # alerts — по каждому алерту; incidents — только новый или усилившийся инцидент
+#   cooldown: 10m
+#   batch: 5s
+#   panel_url: https://siem.example.com:8443   # ссылка на алерт в сообщении (по умолчанию public_url)
+#   telegram:
+#     bot_token: '123456:ABC...'   # от @BotFather
+#     chat_id: '-1001234567890'    # ваш чат или группа
+#   email:
+#     smtp: smtp.yandex.ru:465     # host:port
+#     tls: auto                    # auto | starttls | tls | none
+#     username: siem@example.com
+#     password: 'пароль приложения'
+#     from: siem@example.com
+#     to: ['admin@example.com']
+#   webhook:
+#     url: https://hooks.slack.com/services/...
+#     format: slack                # json | slack | discord
+
+# Автоматическая блокировка атакующих адресов. Список блокировок ведёт SIEM,
+# а применяют его агенты, у которых в agent.yaml включено "firewall: auto".
+# Вручную блокировать и разблокировать можно в панели (раздел «Реагирование» и карточка алерта).
+response:
+  auto_block:
+    enabled: true
+    min_severity: critical     # блокировать по алертам этого уровня и выше
+    # rules: [AUTH-BRUTE-001]  # и/или по этим правилам независимо от уровня
+    duration: 1h               # на сколько; 0 — навсегда
+    max_per_minute: 60         # защита от лавины: не больше N новых адресов в минуту
+    block_private: false       # внутренние сети (10.x, 192.168.x, ...) не блокируются
+  allowlist:                   # эти адреса и сети не блокируются никогда (ни автоматически, ни вручную)
+    # - 203.0.113.10           # например, ваш офис или сервер мониторинга
+
+# ---------------- Скорость ----------------
+# Потоков обнаружения атак: auto — по числу ядер (на 1–2 ядрах — один поток).
+# События делятся между потоками по IP источника, результат тот же, что и в одном потоке.
+detect_threads: auto
+# Потоков сжатия при записи на диск: auto — по числу ядер, 0 — сжимать в потоке записи.
+store_threads: auto
+
+# ---------------- Расследование ----------------
+# База стран и сетей по IP. Создаётся командой:
+#   sentinel-server geo-import dbip-country-ipv4.csv dbip-country-ipv6.csv dbip-asn-ipv4.csv
+# (бесплатные данные DB-IP Lite, CC BY 4.0: https://db-ip.com/db/lite.php)
+# geo_db: ./data/geo/geo.bin
+
+# Инциденты: алерты одной атаки (один IP) в одной карточке, пока атака не затихнет на window.
+# incidents:
+#   window: 1h
+
+# Еженедельный отчёт на почту (через notify.email). Время — местное время сервера.
+# reports:
+#   weekly:
+#     day: monday
+#     time: "09:00"
+#     to: [boss@example.com]
+
+# Чёрные списки адресов: сервер скачивает их сам и обновляет по расписанию.
+# События с таких адресов получают ti.listed: true (правило TI-LISTED-001).
+# threat_intel:
+#   refresh: 6h
+#   lists:
+#     - name: firehol_level1
+#       url: https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset
+#     - name: spamhaus_drop
+#       url: https://www.spamhaus.org/drop/drop.txt
+#     - name: tor_exit
+#       url: https://check.torproject.org/torbulkexitlist
+#     - name: my_list
+#       file: /etc/sentinel/bad-ips.txt

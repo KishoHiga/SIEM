@@ -1,0 +1,35 @@
+id: WEB-XSS-001
+name: Попытка XSS
+description: В адресе запроса найден HTML/JavaScript (script-теги, обработчики событий, javascript:).
+severity: high
+type: match
+tags: [web, xss, owasp-a03]
+where:
+  type: web
+field: http.path
+transform: [unescape, url_decode, html_decode, compress_space, lowercase]
+patterns:
+  - '<script[\s/>]'
+  - 'javascript\s*:'
+  - 'vbscript\s*:'
+  - '<[a-z]+[^>]*[\s/]on[a-z]+\s*='
+  - '<(iframe|object|embed|svg|math|base|meta)[\s/>]'
+  - '["\x27\s/]on(error|load|mouseover|focus|click|animationstart|toggle|pointerover)\s*='
+  - 'document\.(cookie|domain|location)'
+  - '(alert|prompt|confirm)\s*\(\s*(document|\d|\x27|"|`)'
+  - 'data:text/html'
+message: 'XSS с {src_ip}: {http.path}'
+tests:
+  match:
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=<ScRiPt>alert(1)</ScRiPt> HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /p?x=%22%3E%3Cimg%20src%3Dx%20onerror%3Dalert(document.cookie)%3E HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /p?x=%253Csvg%2Fonload%3Dalert(1)%253E HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /redirect?url=javascript:alert(1) HTTP/1.1" 302 0 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /p?x=&lt;script&gt;alert(1) HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+  no_match:
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=javascript+tutorial HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /blog/onload-event-explained HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=alert+system HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /scripts/main.js HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '203.0.113.6 - - [12/Oct/2026:10:00:00 +0000] "GET /search?q=description+of+onerror+handling HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

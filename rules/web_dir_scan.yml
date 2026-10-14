@@ -1,0 +1,20 @@
+id: WEB-SCAN-001
+name: Перебор адресов (сканирование сайта)
+description: Один IP получил ответ 404 на много РАЗНЫХ адресов за минуту — так работают сканеры каталогов.
+severity: medium
+type: threshold
+threshold: 40
+window: 60
+distinct: http.path
+group_by: [src_ip]
+tags: [web, recon]
+where:
+  type: web
+  http.status: 404
+message: 'Сканирование сайта с {src_ip}: {count} разных несуществующих адресов за {window} с'
+tests:
+  match:
+    - '192.0.2.60 - - [12/Oct/2026:10:00:00 +0000] "GET /admin{n}.php HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+  no_match:
+    - '192.0.2.60 - - [12/Oct/2026:10:00:00 +0000] "GET /favicon.ico HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.60 - - [12/Oct/2026:10:00:00 +0000] "GET /page{n} HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

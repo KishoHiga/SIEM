@@ -1,0 +1,8 @@
+build/
+build-*/
+data/
+sentinel.yaml
+*.o
+*.a
+.DS_Store
+web/node_modules/

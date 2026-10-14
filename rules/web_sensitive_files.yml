@@ -1,0 +1,36 @@
+id: WEB-SENS-001
+name: Поиск секретных файлов
+description: Запрос к файлам, которые не должны быть доступны снаружи (.env, .git, бэкапы БД, phpinfo).
+severity: medium
+type: match
+cooldown: 300
+tags: [web, recon]
+where:
+  type: web
+field: http.path
+transform: [unescape, url_decode, html_decode, compress_space, lowercase]
+patterns:
+  - '/\.env(\.[a-z]+)?(\?|$)'
+  - '/\.git(/|$)'
+  - '/\.(svn|hg|ds_store|aws|ssh|docker|kube|npmrc|bash_history)(/|\?|$)'
+  - 'wp-config\.php(\.|~|$|\?)'
+  - '/(id_rsa|id_dsa|\.htpasswd|\.htaccess|web\.config|database\.yml|credentials\.json)(\?|$)'
+  - '/(phpinfo|info|test)\.php(\?|$)'
+  - '/server-status(\?|$)'
+  - '\.(sql|bak|old|swp|backup|dump)(\.gz|\.zip|\.tar)?(\?|$)'
+  - '/(phpmyadmin|pma|adminer|myadmin)(\.php)?(/|\?|$)'
+  - '/actuator/(env|heapdump|configprops|mappings)(\?|$)'
+message: 'Поиск секретных файлов с {src_ip}: {http.path}'
+tests:
+  match:
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /.env HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /.git/config HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /wp-config.php.bak HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /backup.sql HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /phpmyadmin/ HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /actuator/env HTTP/1.1" 404 0 "-" "Mozilla/5.0"'
+  no_match:
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /environment HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /blog/git-tips HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /docs/sql-basics HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.30 - - [12/Oct/2026:10:00:00 +0000] "GET /static/app.js HTTP/1.1" 200 512 "-" "Mozilla/5.0"'

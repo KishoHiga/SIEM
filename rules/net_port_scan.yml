@@ -1,0 +1,18 @@
+id: NET-SCAN-001
+name: Сканирование портов
+description: С одного IP пришли пакеты на 15 и более разных портов за минуту (по журналу брандмауэра).
+severity: medium
+type: threshold
+threshold: 15
+window: 60
+distinct: dst_port
+group_by: [src_ip]
+tags: [network, recon]
+where:
+  type: network
+message: 'Сканирование портов с {src_ip}: {count} разных портов за {window} с'
+tests:
+  match:
+    - 'Oct 12 11:00:08 web-01 kernel: [12345.678] [UFW BLOCK] IN=eth0 OUT= SRC=185.1.2.3 DST=10.0.0.1 LEN=44 PROTO=TCP SPT=40000 DPT={n} WINDOW=1024'
+  no_match:
+    - 'Oct 12 11:00:08 web-01 kernel: [12345.678] [UFW BLOCK] IN=eth0 OUT= SRC=185.1.2.3 DST=10.0.0.1 LEN=44 PROTO=TCP SPT=40000 DPT=22 WINDOW=1024'

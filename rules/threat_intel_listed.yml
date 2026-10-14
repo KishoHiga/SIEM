@@ -1,0 +1,13 @@
+# Адрес из чёрного списка (FireHOL, Spamhaus, Tor и др. — см. threat_intel в sentinel.yaml).
+# Пока списки не настроены, правило ничего не делает.
+id: TI-LISTED-001
+name: Обращение с адреса из чёрного списка
+description: Источник события есть в одном из подключённых списков плохих адресов (известные атакующие, ботнеты, выходные узлы Tor).
+severity: medium
+type: match
+group_by: [src_ip]
+cooldown: 3600             # не чаще раза в час на адрес
+tags: [threat-intel, recon]
+where:
+  ti.listed: 'true'
+message: 'Адрес {src_ip} из списков: {ti.lists} ({geo.country} {geo.org})'

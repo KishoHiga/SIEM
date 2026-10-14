@@ -1,0 +1,23 @@
+id: WEB-BRUTE-001
+name: Перебор паролей на сайте
+description: Много POST-запросов к странице входа с одного IP за короткое время.
+severity: high
+type: threshold
+threshold: 10
+window: 300
+group_by: [src_ip]
+tags: [web, bruteforce]
+where:
+  type: web
+  http.method: POST
+  http.path:
+    regex: '(login|signin|sign-in|log-in|auth|wp-login\.php|xmlrpc\.php|session|token|password)'
+    transform: [unescape, url_decode, html_decode, compress_space, lowercase]
+message: 'Перебор паролей на сайте с {src_ip}: {count} попыток за {window} с ({http.path})'
+tests:
+  match:
+    - '192.0.2.50 - - [12/Oct/2026:10:00:00 +0000] "POST /wp-login.php HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.50 - - [12/Oct/2026:10:00:00 +0000] "POST /api/auth/login HTTP/1.1" 401 32 "-" "python-requests/2.31"'
+  no_match:
+    - '192.0.2.50 - - [12/Oct/2026:10:00:00 +0000] "GET /login HTTP/1.1" 200 512 "-" "Mozilla/5.0"'
+    - '192.0.2.50 - - [12/Oct/2026:10:00:00 +0000] "POST /api/comments HTTP/1.1" 201 64 "-" "Mozilla/5.0"'
