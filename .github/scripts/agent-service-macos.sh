@@ -38,6 +38,7 @@ printf '{"msg":"x"}\n' > "$d/second.log"
 for _ in $(seq 1 10); do grep -q "new source \[ci2\]" "$log" && break; sleep 1; done
 grep -q "new source \[ci2\]" "$log" || { echo "::error title=agent service::running agent did not pick up 'add'"; cat "$log"; exit 1; }
 ./sentinel-agent service uninstall
+sleep 1
 if launchctl print "gui/$(id -u)/com.sentinelcore.agent" >/dev/null 2>&1; then
   echo "::error title=agent service::still loaded after uninstall"; exit 1
 fi

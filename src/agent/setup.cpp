@@ -1,11 +1,13 @@
 #include "agent/setup.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 #include "agent/process.hpp"
 #include "core/util.hpp"
@@ -416,6 +418,14 @@ ServiceInfo service_info() {
 
 #if defined(__APPLE__)
 static std::string launchd_domain() { return is_root() ? "system" : "gui/" + std::to_string(getuid()); }
+
+// bootout снимает службу не мгновенно: ждём, пока launchd её забудет (до 10 с)
+static void launchd_wait_unloaded(const std::string& target) {
+    for (int i = 0; i < 100; ++i) {
+        if (!run({"/bin/launchctl", "print", target}).ok()) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
 #endif
 
 bool service_install(const std::string& exe, const std::string& config, std::string& out, std::string& error) {
@@ -436,7 +446,7 @@ bool service_install(const std::string& exe, const std::string& config, std::str
     fs::create_directories(fs::path(si.file).parent_path(), ec);
     std::string domain = launchd_domain();
     // уже установлена — снять старую (новые пути / новая версия)
-    run({"/bin/launchctl", "bootout", domain + "/" + kLabel});
+    if (run({"/bin/launchctl", "bootout", domain + "/" + kLabel}).ok()) launchd_wait_unloaded(domain + "/" + kLabel);
     if (!write_file_atomic(si.file, launchd_plist(exe, config, log_file), error)) return false;
     fs::permissions(si.file, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read,
                     fs::perm_options::replace, ec);
@@ -504,8 +514,10 @@ bool service_uninstall(std::string& out, std::string& error) {
     ServiceInfo si = service_info();
     std::error_code ec;
 #if defined(__APPLE__)
-    ProcResult r = run({"/bin/launchctl", "bootout", launchd_domain() + "/" + kLabel});
+    const std::string target = launchd_domain() + "/" + kLabel;
+    ProcResult r = run({"/bin/launchctl", "bootout", target});
     if (!r.ok() && fs::exists(si.file, ec)) run({"/bin/launchctl", "unload", "-w", si.file});
+    launchd_wait_unloaded(target);
     bool had = fs::remove(si.file, ec);
     out = had || r.ok() ? "Removed: the agent no longer runs in the background.\n" : "The service was not installed.\n";
     return true;
