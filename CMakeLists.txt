@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SentinelCore VERSION 0.6.1 LANGUAGES CXX)
+project(SentinelCore VERSION 0.6.2 LANGUAGES CXX)
 
 # Весь код — свой. Зависимости: только стандартная библиотека C++ и API ОС.
 set(CMAKE_CXX_STANDARD 20)

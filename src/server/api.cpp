@@ -402,7 +402,7 @@ void Api::handle(const HttpRequest& req, HttpResponse& resp) {
     }
     if (parts.size() == 1 && parts[0] == "health") {
         std::string b;
-        JsonWriter(b).begin_object().kv("status", "ok").kv("version", "0.6.1").end_object();
+        JsonWriter(b).begin_object().kv("status", "ok").kv("version", "0.6.2").end_object();
         resp.json(200, std::move(b));
         return;
     }

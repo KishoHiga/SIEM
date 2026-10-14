@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 
 namespace sentinel::agent {
 
-const char* kAgentVersion = "0.6.1";
+const char* kAgentVersion = "0.6.2";
 
 static const char* os_name() {
 #if defined(_WIN32)
