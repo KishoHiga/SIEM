@@ -5,9 +5,7 @@ import { Icon } from "../components/Icons";
 import { Card, CopyButton, Empty, ErrorBox, Modal, Spinner, useAsync, useInterval } from "../components/Ui";
 import { ago, dateTime, num } from "../format";
 import { navigate, useTitle } from "../router";
-
-const REPO = "https://github.com/KishoHiga/SIEM";
-const RELEASES = REPO + "/releases";
+import { REPO, RELEASES, detectPlatform, enrollInfo, getAgentCommands, type AgentPlatform } from "../agentSetup";
 
 export function AgentsPage({ me }: { me: Me }) {
   useTitle("Серверы");
@@ -28,9 +26,12 @@ export function AgentsPage({ me }: { me: Me }) {
           </span>
         )}
         <span className="grow" />
+        <button className="btn btn-primary" onClick={() => navigate("/connect")}>
+          <Icon name="plus" size={16} /> Подключить сайт
+        </button>
         {me.is_admin && (
-          <button className="btn btn-primary" onClick={() => setAdding(true)}>
-            <Icon name="plus" size={16} /> Подключить сервер
+          <button className="btn" onClick={() => setAdding(true)} title="Только агент: сам найдёт журналы nginx, SSH, системы">
+            <Icon name="server" size={16} /> Подключить сервер
           </button>
         )}
       </div>
@@ -42,7 +43,7 @@ export function AgentsPage({ me }: { me: Me }) {
         <Card>
           <Empty>
             Пока ни один сервер не присылал логи.
-            {me.is_admin ? " Нажмите «Подключить сервер» — панель выдаст готовую команду." : " Попросите администратора подключить сервер."}
+            {" Нажмите «Подключить сайт» — мастер по шагам покажет, как включить журнал запросов и подключить агента."}
           </Empty>
         </Card>
       ) : (
@@ -120,25 +121,12 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  // Если в конфиге нет public_url и сервер слушает 0.0.0.0, подставляем адрес, по которому открыта панель
-  const placeholder = "<адрес-сервера>";
-  const guessed = !!token && token.server.includes(placeholder);
-  const server = token ? token.server.replace(placeholder, window.location.hostname) : "";
-  const command = token ? token.command.replace(placeholder, window.location.hostname) : "";
-  const [platform, setPlatform] = useState<"mac" | "linux">(
-    /Mac/i.test(navigator.userAgent) ? "mac" : "linux",
-  );
-  // агент запускается из текущей папки: ./sentinel-agent
-  const enrollCmd = command.replace(/^sentinel-agent /, "./sentinel-agent ");
-  const getAgent =
-    platform === "mac"
-      ? "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
-        // rm перед cp: macOS убивает программу, скопированную поверх старой (помнит подпись прежнего файла)
-        "rm -f sentinel-agent && cp /Applications/SentinelCore.app/Contents/Resources/bin/sentinel-agent .\n" +
-        "xattr -d com.apple.quarantine sentinel-agent 2>/dev/null; ./sentinel-agent version"
-      : "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
-        "rm -f sentinel-agent && docker run --rm --entrypoint cat ghcr.io/kishohiga/siem /usr/local/bin/sentinel-agent > sentinel-agent\n" +
-        "chmod +x sentinel-agent && ./sentinel-agent version";
+  const info = token ? enrollInfo(token) : null;
+  const guessed = !!info?.guessed;
+  const server = info?.server ?? "";
+  const enrollCmd = info?.command ?? "";
+  const [platform, setPlatform] = useState<AgentPlatform>(detectPlatform);
+  const getAgent = getAgentCommands(platform);
 
   return (
     <Modal title="Подключить сервер" onClose={onClose}>
@@ -215,8 +203,10 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
               <CopyButton text={enrollCmd} label="Копировать команду" />
             </li>
             <li>
-              Запустите: <code>./sentinel-agent run</code> — и не закрывайте окно (или запустите как службу — см. README).
-              Сервер появится в этом списке через несколько секунд.
+              Запустите в фоне (окно можно закрыть, после перезагрузки агент стартует сам):
+              <pre className="cmd">{platform === "linux" ? "sudo " : ""}./sentinel-agent service install</pre>
+              Сервер появится в этом списке через несколько секунд. Журнал своего сайта добавьте командой{" "}
+              <code>./sentinel-agent add /путь/к/access.log</code> или через мастер «Подключить сайт».
             </li>
           </ol>
           <dl className="kv">

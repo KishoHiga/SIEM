@@ -2308,3 +2308,241 @@ select:focus {
     overflow: visible;
   }
 }
+
+/* --- мастер «Подключить сайт» --- */
+.connect {
+  max-width: 980px;
+}
+.connect-lead {
+  margin: -4px 0 16px;
+  max-width: 760px;
+}
+.stepper {
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  padding: 0;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+.stepper li {
+  flex: 1;
+  min-width: 120px;
+}
+.stepper button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.stepper button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.stepper .num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  font-size: 12px;
+  font-weight: 600;
+  flex: none;
+}
+.stepper li.active button {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.stepper li.active .num {
+  background: var(--accent);
+  color: #fff;
+}
+.stepper li.done .num {
+  background: rgb(34 197 94 / 0.2);
+  color: var(--ok);
+}
+.connect-row {
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.guide-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.guide-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.guide-card:hover {
+  border-color: var(--border-2);
+}
+.guide-card.active {
+  border-color: var(--accent);
+  background: rgb(59 130 246 / 0.12);
+}
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+label.check input {
+  width: auto;
+}
+label.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 12px 0;
+  max-width: 640px;
+}
+.code-block {
+  margin: 6px 0 4px;
+}
+.code-block .cmd {
+  margin: 0 0 6px;
+  max-height: 420px;
+  overflow: auto;
+  word-break: normal;
+  white-space: pre;
+}
+.code-file {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent-2);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+button.link:hover {
+  text-decoration: underline;
+}
+kbd {
+  font-family: var(--mono);
+  font-size: 12px;
+  border: 1px solid var(--border-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--bg-2);
+}
+.connect-notes {
+  color: var(--text-2);
+  font-size: 13px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connect-token {
+  margin-top: 4px;
+}
+.connect-nav {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.connect-ok {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: rgb(34 197 94 / 0.1);
+  border: 1px solid rgb(34 197 94 / 0.35);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.connect-ok svg {
+  color: var(--ok);
+  flex: none;
+}
+.connect-ok p {
+  margin: 0 0 4px;
+}
+.connect-wait {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.connect-wait p {
+  margin: 0 0 6px;
+}
+.spinner-dot {
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.connect-help {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.connect-help ol {
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connect code,
+.connect-help code {
+  word-break: break-all;
+}
+@media (max-width: 640px) {
+  .stepper li {
+    min-width: 45%;
+  }
+}

@@ -6,6 +6,7 @@ import { Spinner } from "./components/Ui";
 import { roleLabel } from "./format";
 import { LiveProvider, useLive } from "./live";
 import { AgentsPage } from "./pages/Agents";
+import { ConnectSitePage } from "./pages/ConnectSite";
 import { AlertDetailPage } from "./pages/AlertDetail";
 import { AlertsPage } from "./pages/Alerts";
 import { DashboardPage } from "./pages/Dashboard";
@@ -105,6 +106,7 @@ function Shell({ me, onLogout }: { me: Me; onLogout: () => void }) {
   else if (path === "/response") page = <ResponsePage me={me} />;
   else if ((m = match("/ip/:addr", path))) page = <IpPage key={m.addr} addr={m.addr} me={me} />;
   else if (path === "/agents") page = <AgentsPage me={me} />;
+  else if (path === "/connect") page = <ConnectSitePage me={me} />;
   else
     page = (
       <div className="page">
