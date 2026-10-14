@@ -30,8 +30,8 @@ jobs:
     name: macOS app (Apple Silicon + Intel)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Version
@@ -41,7 +41,7 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: OpenSSL cache
         id: ssl
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/openssl
           key: openssl-${{ env.OPENSSL_VERSION }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-universal-v1
@@ -73,7 +73,7 @@ jobs:
           ls -la /tmp/sc-dmg
           test -x "/tmp/sc-dmg/SentinelCore.app/Contents/MacOS/SentinelCore"
           hdiutil detach /tmp/sc-dmg -quiet
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: |
@@ -85,7 +85,7 @@ jobs:
     name: Linux tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q libssl-dev
@@ -93,6 +93,14 @@ jobs:
           cmake --build build -j 4
       - name: Tests
         run: .github/scripts/run-tests.sh ./build/sentinel-tests
+      - name: Published image is public
+        run: |
+          img="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+          if docker manifest inspect "$img" > manifest.json 2> err.txt; then
+            echo "::notice title=image::$img can be pulled without logging in ($(grep -c '"architecture"' manifest.json) platforms)"
+          else
+            echo "::warning title=image::$img cannot be pulled anonymously: $(head -c 300 err.txt)"
+          fi
 
   docker:
     name: Docker (${{ matrix.arch }})
@@ -109,7 +117,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Image name
         id: img
         run: |
@@ -133,7 +141,7 @@ jobs:
           mkdir -p digests
           python3 -c "import json; print(json.load(open('meta.json'))['containerimage.digest'])" > digests/${{ matrix.arch }}
           cat digests/${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
         with:
           name: digest-${{ matrix.arch }}
@@ -148,8 +156,8 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Docker image (amd64 + arm64)
