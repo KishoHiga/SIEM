@@ -133,10 +133,11 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
   const getAgent =
     platform === "mac"
       ? "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
-        "cp /Applications/SentinelCore.app/Contents/Resources/bin/sentinel-agent .\n" +
+        // rm перед cp: macOS убивает программу, скопированную поверх старой (помнит подпись прежнего файла)
+        "rm -f sentinel-agent && cp /Applications/SentinelCore.app/Contents/Resources/bin/sentinel-agent .\n" +
         "xattr -d com.apple.quarantine sentinel-agent 2>/dev/null; ./sentinel-agent version"
       : "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
-        "docker run --rm --entrypoint cat ghcr.io/kishohiga/siem /usr/local/bin/sentinel-agent > sentinel-agent\n" +
+        "rm -f sentinel-agent && docker run --rm --entrypoint cat ghcr.io/kishohiga/siem /usr/local/bin/sentinel-agent > sentinel-agent\n" +
         "chmod +x sentinel-agent && ./sentinel-agent version";
 
   return (
