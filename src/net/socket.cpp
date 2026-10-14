@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 #ifdef _WIN32
 #ifdef _MSC_VER
@@ -92,7 +93,60 @@ std::string error_text(int err) {
 #endif
 }
 
+#ifndef _WIN32
+namespace {
+// Отвечает ли кто-то на ip:port (короткая попытка подключения).
+bool someone_listens(const char* ip, uint16_t port) {
+    addrinfo hints{};
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    addrinfo* res = nullptr;
+    if (getaddrinfo(ip, std::to_string(port).c_str(), &hints, &res) != 0 || !res) return false;
+    bool answered = false;
+    int s = ::socket(res->ai_family, SOCK_STREAM, 0);
+    if (s >= 0) {
+        fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK);
+        int rc = ::connect(s, res->ai_addr, socklen_t(res->ai_addrlen));
+        if (rc == 0) {
+            answered = true;
+        } else if (errno == EINPROGRESS) {
+            pollfd p{s, POLLOUT, 0};
+            if (::poll(&p, 1, 300) == 1) {
+                int err = 0;
+                socklen_t len = sizeof(err);
+                getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len);
+                answered = err == 0;
+            }
+        }
+        ::close(s);
+    }
+    freeaddrinfo(res);
+    return answered;
+}
+}  // namespace
+#endif
+
 socket_t listen_tcp(const std::string& host, uint16_t port, std::string& error) {
+#ifndef _WIN32
+    // На macOS (как и в BSD) SO_REUSEADDR позволяет занять 127.0.0.1:порт, даже если другая программа уже
+    // слушает этот порт на всех адресах, — и два сервера молча делят один порт. Поэтому сначала спрашиваем:
+    // отвечает ли на этом порту кто-то ещё.
+    if (port != 0) {
+        std::vector<std::string> probe;
+        if (host.empty() || host == "0.0.0.0" || host == "::" || host == "127.0.0.1" || host == "localhost" ||
+            host == "::1")
+            probe = {"127.0.0.1", "::1"};
+        else
+            probe = {host};
+        for (auto& ip : probe)
+            if (someone_listens(ip.c_str(), port)) {
+                error = "port " + std::to_string(port) + " is already used by another program (it answers on " +
+                        (ip.find(':') != std::string::npos ? "[" + ip + "]" : ip) + ":" + std::to_string(port) +
+                        "). Choose another port in 'listen'";
+                return kInvalidSocket;
+            }
+    }
+#endif
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;

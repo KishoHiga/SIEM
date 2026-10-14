@@ -9,6 +9,7 @@
 #include "detect/engine.hpp"
 #include "detect/rules.hpp"
 #include "net/server.hpp"
+#include "net/socket.hpp"
 #include "server/api.hpp"
 #include "testing.hpp"
 
@@ -265,4 +266,26 @@ TEST("http: poll() backend (macOS/Windows path) works too") {
 #else
     unsetenv("SENTINEL_POLLER");
 #endif
+}
+
+TEST("net: listening refuses a port another program already uses (macOS lets 127.0.0.1 share it with 0.0.0.0)") {
+    std::string err;
+    net::ServerOptions o;
+    o.host = "0.0.0.0";
+    o.port = 0;
+    o.workers = 1;
+    net::HttpServer other(o, [](const net::HttpRequest&, net::HttpResponse& rs) { rs.body = "other"; });
+    REQUIRE(other.start(err));
+    const uint16_t port = other.port();
+    REQUIRE(port != 0);
+    net::socket_t mine = net::listen_tcp("127.0.0.1", port, err);
+    CHECK(mine == net::kInvalidSocket);
+    CHECK(err.find(std::to_string(port)) != std::string::npos);
+    if (mine != net::kInvalidSocket) net::close_socket(mine);
+    CHECK(net::listen_tcp("0.0.0.0", port, err) == net::kInvalidSocket);
+    other.stop();
+    // порт освободился — занимается без ошибок
+    net::socket_t again = net::listen_tcp("127.0.0.1", port, err);
+    CHECK(again != net::kInvalidSocket);
+    if (again != net::kInvalidSocket) net::close_socket(again);
 }

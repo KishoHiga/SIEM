@@ -192,26 +192,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    /// Порт свободен, если на нём никто не отвечает — ни по IPv4, ни по IPv6.
+    /// (Попытка просто занять порт тут не годится: macOS разрешает делить порт с программой,
+    /// которая слушает все адреса, — например, с вашим сайтом на localhost:8080.)
     private func portIsFree(_ p: Int) -> Bool {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        !answers(p, ipv6: false) && !answers(p, ipv6: true)
+    }
+
+    /// Отвечает ли кто-то на 127.0.0.1:p или [::1]:p.
+    private func answers(_ p: Int, ipv6: Bool) -> Bool {
+        let fd = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0)
         if fd < 0 { return false }
         defer { close(fd) }
-        var yes: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = in_port_t(UInt16(p).bigEndian)
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let rc = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        var tv = timeval(tv_sec: 0, tv_usec: 300_000)
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        if ipv6 {
+            var a = sockaddr_in6()
+            a.sin6_family = sa_family_t(AF_INET6)
+            a.sin6_port = in_port_t(UInt16(p).bigEndian)
+            a.sin6_addr = in6addr_loopback
+            return withUnsafePointer(to: &a) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) }
+            } == 0
         }
-        return rc == 0
+        var a = sockaddr_in()
+        a.sin_family = sa_family_t(AF_INET)
+        a.sin_port = in_port_t(UInt16(p).bigEndian)
+        a.sin_addr.s_addr = inet_addr("127.0.0.1")
+        return withUnsafePointer(to: &a) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        } == 0
+    }
+
+    /// Порт из настроек занят другой программой — переехать на свободный и переписать строку listen.
+    private func moveOffBusyPort() {
+        guard !portIsFree(port), let newPort = freePort(from: port + 1),
+              var text = try? String(contentsOf: configURL, encoding: .utf8) else { return }
+        var lines = text.components(separatedBy: "\n")
+        for (i, raw) in lines.enumerated() where raw.trimmingCharacters(in: .whitespaces).hasPrefix("listen:") {
+            var value = raw.trimmingCharacters(in: .whitespaces).dropFirst("listen:".count).trimmingCharacters(in: .whitespaces)
+            if let hash = value.firstIndex(of: "#") { value = String(value[..<hash]).trimmingCharacters(in: .whitespaces) }
+            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            let host = value.lastIndex(of: ":").map { String(value[..<$0]) } ?? "127.0.0.1"
+            lines[i] = "listen: \(host.isEmpty ? "127.0.0.1" : host):\(newPort)"
+        }
+        text = lines.joined(separator: "\n")
+        guard (try? text.write(to: configURL, atomically: true, encoding: .utf8)) != nil else { return }
+        let old = port
+        port = newPort
+        DispatchQueue.main.async { [weak self] in
+            self?.alert("Порт \(old) занят другой программой",
+                        "Его уже использует другая программа (например, ваш сайт). SentinelCore теперь работает на порту \(newPort): http://127.0.0.1:\(newPort)")
+        }
     }
 
     // MARK: - сервер
 
     private func startServer() {
         killLeftover()
+        moveOffBusyPort()
         guard fm.isExecutableFile(atPath: serverBinary.path) else {
             setState("Нет программы сервера в приложении", ok: false)
             return
@@ -402,6 +441,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func alert(_ title: String, _ text: String) {
+        if ProcessInfo.processInfo.environment["SENTINEL_APP_NO_BROWSER"] != nil {
+            FileHandle.standardError.write("\(title): \(text)\n".data(using: .utf8)!)  // автоматическая проверка
+            return
+        }
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = title

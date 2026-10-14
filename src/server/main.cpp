@@ -49,7 +49,7 @@ namespace fs = std::filesystem;
 static std::atomic<bool> g_stop{false};
 static void on_signal(int) { g_stop.store(true); }
 
-static const char* kVersion = "0.6.0";
+static const char* kVersion = "0.6.1";
 
 static void usage() {
     std::cout << "SentinelCore SIEM server " << kVersion << "\n\n"

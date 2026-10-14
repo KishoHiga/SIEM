@@ -6,6 +6,9 @@ import { Card, CopyButton, Empty, ErrorBox, Modal, Spinner, useAsync, useInterva
 import { ago, dateTime, num } from "../format";
 import { navigate, useTitle } from "../router";
 
+const REPO = "https://github.com/KishoHiga/SIEM";
+const RELEASES = REPO + "/releases";
+
 export function AgentsPage({ me }: { me: Me }) {
   useTitle("Серверы");
   const res = useAsync(() => api.agents(), []);
@@ -122,6 +125,19 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
   const guessed = !!token && token.server.includes(placeholder);
   const server = token ? token.server.replace(placeholder, window.location.hostname) : "";
   const command = token ? token.command.replace(placeholder, window.location.hostname) : "";
+  const [platform, setPlatform] = useState<"mac" | "linux">(
+    /Mac/i.test(navigator.userAgent) ? "mac" : "linux",
+  );
+  // агент запускается из текущей папки: ./sentinel-agent
+  const enrollCmd = command.replace(/^sentinel-agent /, "./sentinel-agent ");
+  const getAgent =
+    platform === "mac"
+      ? "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
+        "cp /Applications/SentinelCore.app/Contents/Resources/bin/sentinel-agent .\n" +
+        "xattr -d com.apple.quarantine sentinel-agent 2>/dev/null; ./sentinel-agent version"
+      : "mkdir -p ~/sentinel-agent && cd ~/sentinel-agent\n" +
+        "docker run --rm --entrypoint cat ghcr.io/kishohiga/siem /usr/local/bin/sentinel-agent > sentinel-agent\n" +
+        "chmod +x sentinel-agent && ./sentinel-agent version";
 
   return (
     <Modal title="Подключить сервер" onClose={onClose}>
@@ -157,17 +173,49 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
         </form>
       ) : (
         <div className="enroll-result">
+          <div className="seg">
+            {(["mac", "linux"] as const).map((p) => (
+              <button key={p} className={platform === p ? "active" : ""} onClick={() => setPlatform(p)}>
+                {p === "mac" ? "Mac" : "Linux"}
+              </button>
+            ))}
+          </div>
           <ol className="steps">
             <li>
-              Установите <code>sentinel-agent</code> на сервер (скопируйте файл из сборки).
+              Возьмите агента — маленькую программу, которая будет читать логи на этом сервере и присылать их сюда.
+              В Терминале на защищаемом {platform === "mac" ? "Mac" : "сервере"}:
+              <pre className="cmd">{getAgent}</pre>
+              <CopyButton text={getAgent} label="Копировать" />
+              <p className="hint">
+                {platform === "mac" ? (
+                  <>
+                    Агент лежит внутри приложения SentinelCore. Если приложения на этом Mac нет — скачайте архив{" "}
+                    <code>sentinel-…-macos-universal.tar.gz</code> со страницы{" "}
+                    <a href={RELEASES} target="_blank" rel="noreferrer">
+                      Releases
+                    </a>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Агент берётся из Docker-образа (подходит для Ubuntu 24.04+, Debian 13+). Для других систем соберите его
+                    из исходников — см. README на{" "}
+                    <a href={REPO} target="_blank" rel="noreferrer">
+                      GitHub
+                    </a>
+                    .
+                  </>
+                )}
+              </p>
             </li>
             <li>
-              Выполните на нём команду:
-              <pre className="cmd">{command}</pre>
-              <CopyButton text={command} label="Копировать команду" />
+              Подключите его к SIEM (в той же папке):
+              <pre className="cmd">{enrollCmd}</pre>
+              <CopyButton text={enrollCmd} label="Копировать команду" />
             </li>
             <li>
-              Запустите агента: <code>sentinel-agent run</code> (или как службу — см. README).
+              Запустите: <code>./sentinel-agent run</code> — и не закрывайте окно (или запустите как службу — см. README).
+              Сервер появится в этом списке через несколько секунд.
             </li>
           </ol>
           <dl className="kv">
